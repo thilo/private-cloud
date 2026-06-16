@@ -133,6 +133,36 @@ additionally drops its data daemons (`seaf-server`, `seahub`, `fileserver`) to a
 non-root uid; only the bundled `my_init`/nginx master remain root, which the
 stock image requires.
 
+## Resource limits (fits a 4 GB host)
+
+The stack is tuned to run on a **4 GB** machine. Every long-running service has a
+`mem_limit` (a hard ceiling — ceilings, not reservations) so no single service
+can balloon and trigger the host OOM-killer; the caps sum to ~3.8 GB, leaving
+headroom for the OS and page cache. Steady-state usage is **≈ 1.3–1.4 GB**.
+
+| Service | `mem_limit` | Tuning |
+|---------|-------------|--------|
+| immich-server | 1024M | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap) |
+| immich-ml | 1024M | idle-model unload (`MODEL_TTL=300`), 1 worker, serialized inference |
+| seafile-server | 640M | seahub gunicorn workers 5→2 (`scripts/tune-seafile.sh`) |
+| immich-db | 512M | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM |
+| seafile-db | 320M | MariaDB `innodb_buffer_pool=96M`, `performance_schema=OFF` |
+| caddy / vaultwarden / immich-redis / seafile-redis | 96M each | seafile-redis is a pure cache (`maxmemory 48M` + LRU); immich-redis is the BullMQ job broker, so it is **not** evicted |
+
+> **immich-db note:** the memory flags are layered on top of the image's default
+> `-c config_file=/etc/postgresql/postgresql.conf` (kept in `command:`) — that conf
+> carries the VectorChord `shared_preload_libraries`, which must not be dropped.
+
+After a **fresh** setup (new `seafile_data` volume), apply the seahub worker
+reduction once it's bootstrapped:
+
+```bash
+./scripts/tune-seafile.sh          # cuts seahub gunicorn workers to 2 (~430 MB)
+```
+
+To give a >4 GB host more cache, raise the `immich-db` `shared_buffers` /
+`effective_cache_size` and the per-service `mem_limit`s proportionally.
+
 ## Operations
 
 ```bash
@@ -155,6 +185,7 @@ docker-compose.yml     all services, hardening, networks, volumes
 caddy/Caddyfile        reverse proxy + automatic HTTPS
 scripts/init.sh        generate .env secrets
 scripts/bootstrap.sh   create the Immich admin
+scripts/tune-seafile.sh  cut seahub gunicorn workers to fit 4 GB (run after fresh setup)
 scripts/verify.sh      the three acceptance tests
 scripts/vw-test.mjs    Bitwarden-client crypto used by the password test
 ```

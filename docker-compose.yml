@@ -47,6 +47,7 @@ services:
     image: ${CADDY_IMAGE}
     container_name: pc-caddy
     restart: *restart
+    mem_limit: 96m
     ports:
       - "${HTTP_PORT}:80"
       - "${HTTPS_PORT}:443"
@@ -102,6 +103,7 @@ services:
     image: ${VAULTWARDEN_IMAGE}
     container_name: pc-vaultwarden
     restart: *restart
+    mem_limit: 96m
     user: "1000:1000"
     environment:
       DOMAIN: ${VAULTWARDEN_URL}
@@ -137,7 +139,33 @@ services:
     image: ${IMMICH_DB_IMAGE}
     container_name: pc-immich-db
     restart: *restart
+    mem_limit: 512m
     shm_size: 128mb
+    # Pin memory so the image does not auto-tune shared_buffers/effective_cache_size
+    # to the host's total RAM (it would grab ~25% of the 4 GB box otherwise). We
+    # MUST keep the image's default `-c config_file=...` first — that conf holds the
+    # VectorChord shared_preload_libraries; the later -c flags override only the
+    # memory params (command-line -c wins over the config file).
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - max_connections=30
+      - -c
+      - max_parallel_workers=2
+      - -c
+      - max_parallel_workers_per_gather=1
+      - -c
+      - max_parallel_maintenance_workers=1
     environment:
       POSTGRES_DB: ${IMMICH_DB_NAME}
       POSTGRES_USER: ${IMMICH_DB_USER}
@@ -168,7 +196,10 @@ services:
     image: ${VALKEY_IMAGE}
     container_name: pc-immich-redis
     restart: *restart
+    mem_limit: 96m
     user: "999:1000"
+    # No maxmemory/eviction policy: this Valkey is Immich's BullMQ job broker, so
+    # evicting keys would silently drop queued jobs. The mem_limit is the only cap.
     command:
       - valkey-server
       - --requirepass
@@ -198,8 +229,12 @@ services:
     image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION}
     container_name: pc-immich-server
     restart: *restart
+    mem_limit: 1024m
     user: "1000:1000"
     environment:
+      # Cap the V8 heap below the mem_limit so Node garbage-collects under pressure
+      # instead of being OOM-killed (leaves headroom for off-heap libvips buffers).
+      NODE_OPTIONS: "--max-old-space-size=768"
       DB_HOSTNAME: immich-db
       DB_USERNAME: ${IMMICH_DB_USER}
       DB_PASSWORD: ${IMMICH_DB_PASSWORD}
@@ -231,8 +266,15 @@ services:
     image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION}
     container_name: pc-immich-ml
     restart: *restart
+    mem_limit: 1024m
     environment:
       TZ: ${TZ}
+      # Keep the ML peak bounded for the 4 GB box: unload idle models after 5 min,
+      # a single worker, and serialized inference so concurrent jobs don't stack
+      # multiple model copies in RAM. Jobs throttle/retry rather than OOM the host.
+      MACHINE_LEARNING_MODEL_TTL: "300"
+      MACHINE_LEARNING_WORKERS: "1"
+      MACHINE_LEARNING_REQUEST_THREADS: "1"
     volumes:
       - immich_modelcache:/cache
     networks:
@@ -253,6 +295,14 @@ services:
     image: ${SEAFILE_DB_IMAGE}
     container_name: pc-seafile-db
     restart: *restart
+    mem_limit: 320m
+    # Trim MariaDB's footprint (the entrypoint prepends `mariadbd` to these flags).
+    command:
+      - --innodb-buffer-pool-size=96M
+      - --innodb-log-buffer-size=8M
+      - --performance-schema=OFF
+      - --key-buffer-size=8M
+      - --skip-name-resolve
     environment:
       MYSQL_ROOT_PASSWORD: ${SEAFILE_DB_ROOT_PASSWORD}
       MYSQL_LOG_CONSOLE: "true"
@@ -280,6 +330,7 @@ services:
     image: ${REDIS_IMAGE}
     container_name: pc-seafile-redis
     restart: *restart
+    mem_limit: 96m
     user: "999:1000"
     command:
       - redis-server
@@ -289,6 +340,11 @@ services:
       - ""
       - --appendonly
       - "no"
+      # Pure cache (Seafile CACHE_PROVIDER=redis): bound it and evict LRU keys.
+      - --maxmemory
+      - 48mb
+      - --maxmemory-policy
+      - allkeys-lru
     environment:
       REDISCLI_AUTH: ${SEAFILE_REDIS_PASSWORD}
     networks:
@@ -310,6 +366,7 @@ services:
     image: ${SEAFILE_IMAGE}
     container_name: pc-seafile
     restart: *restart
+    mem_limit: 640m
     environment:
       SEAFILE_MYSQL_DB_HOST: seafile-db
       SEAFILE_MYSQL_DB_PORT: "3306"
