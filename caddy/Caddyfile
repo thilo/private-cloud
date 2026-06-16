@@ -1,0 +1,49 @@
+# Caddy reverse proxy — automatic HTTPS for all three apps.
+#
+# One variable decides local vs production:
+#   CADDY_TLS=internal         -> Caddy's built-in CA (self-signed), local tests
+#   CADDY_TLS=you@example.com  -> automatic Let's Encrypt for real domains
+#
+# Domains come from the environment (SEAFILE_DOMAIN / IMMICH_DOMAIN /
+# VAULTWARDEN_DOMAIN), so this file never changes between deployments.
+
+{
+	# Keep the admin API on loopback inside the container (used by healthcheck).
+	admin localhost:2019
+}
+
+# ------------------------------------------------------------------- Immich --
+{$IMMICH_DOMAIN} {
+	tls {$CADDY_TLS}
+
+	# Immich handles large uploads; don't cap the request body here.
+	reverse_proxy immich-server:2283
+}
+
+# ------------------------------------------------------------------ Seafile --
+{$SEAFILE_DOMAIN} {
+	tls {$CADDY_TLS}
+
+	header {
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		-Server
+	}
+
+	# Seafile handles large uploads; don't cap the request body here.
+	# X-Forwarded-Proto lets Seahub (Django) emit https URLs and pass CSRF checks.
+	reverse_proxy seafile-server:80 {
+		header_up X-Forwarded-Proto https
+	}
+}
+
+# -------------------------------------------------------------- Vaultwarden --
+{$VAULTWARDEN_DOMAIN} {
+	tls {$CADDY_TLS}
+
+	header {
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		-Server
+	}
+
+	reverse_proxy vaultwarden:8080
+}

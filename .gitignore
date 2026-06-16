@@ -1,0 +1,15 @@
+# Secrets and generated runtime config — never commit
+.env
+secrets/
+
+# Local CA export / scratch
+caddy/root.crt
+caddy-root.crt
+*.tmp
+*.bak
+
+# Verification scratch
+scripts/.verify-tmp/
+
+# Claude Code local (personal) settings
+.claude/settings.local.json

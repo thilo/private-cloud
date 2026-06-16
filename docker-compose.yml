@@ -1,0 +1,368 @@
+# Personal Cloud — Seafile + Immich + Vaultwarden behind a hardened Caddy.
+#
+#   ./scripts/init.sh          # generate .env with strong secrets (run once)
+#   docker compose up -d       # bring the stack up
+#   ./scripts/bootstrap.sh     # create the Immich admin
+#   ./scripts/verify.sh        # acceptance tests (file / password / photo)
+#
+# Hardening applied to every service: no-new-privileges, cap_drop ALL (+ only
+# the capabilities an image genuinely needs), pinned images, internal networks
+# for databases, and a single ingress (only Caddy publishes host ports).
+# read_only root filesystem + tmpfs is applied wherever the upstream image
+# tolerates it; see README "Hardening" for the per-image status.
+
+name: private-cloud
+
+x-restart: &restart unless-stopped
+
+networks:
+  # Public-facing bridge. Has egress (apps need it for app store / model
+  # downloads). Fixed subnet keeps the proxy address range predictable.
+  proxy:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET}
+  # Database tiers — internal:true blocks all egress; no published ports means
+  # they are unreachable from the host or the Internet.
+  immich-internal:
+    internal: true
+  seafile-internal:
+    internal: true
+
+volumes:
+  caddy_data:
+  caddy_config:
+  vaultwarden_data:
+  immich_upload:
+  immich_db:
+  immich_modelcache:
+  seafile_data:
+  seafile_db:
+
+services:
+
+  # --------------------------------------------------------------- ingress --
+  caddy:
+    image: ${CADDY_IMAGE}
+    container_name: pc-caddy
+    restart: *restart
+    ports:
+      - "${HTTP_PORT}:80"
+      - "${HTTPS_PORT}:443"
+    environment:
+      IMMICH_DOMAIN: ${IMMICH_DOMAIN}
+      VAULTWARDEN_DOMAIN: ${VAULTWARDEN_DOMAIN}
+      SEAFILE_DOMAIN: ${SEAFILE_DOMAIN}
+      CADDY_TLS: ${CADDY_TLS}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - proxy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      immich-server:
+        condition: service_started
+      vaultwarden:
+        condition: service_started
+      seafile-server:
+        condition: service_started
+
+  # ------------------------------------------------------------ vaultwarden --
+  # One-shot chowner so the non-root services own their data volumes before they
+  # start: vaultwarden + immich-server run as uid 1000, seafile's daemons as uid
+  # 8000 (Seafile's NON_ROOT mode refuses to start unless /shared is writable).
+  volume-init:
+    image: alpine:3.20
+    container_name: pc-volume-init
+    command: ["sh", "-c", "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich && chown -R 8000:8000 /seafile"]
+    volumes:
+      - vaultwarden_data:/vw
+      - immich_upload:/immich
+      - seafile_data:/seafile
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  vaultwarden:
+    image: ${VAULTWARDEN_IMAGE}
+    container_name: pc-vaultwarden
+    restart: *restart
+    user: "1000:1000"
+    environment:
+      DOMAIN: ${VAULTWARDEN_URL}
+      ROCKET_ADDRESS: 0.0.0.0
+      ROCKET_PORT: "8080"
+      DATA_FOLDER: /data
+      SIGNUPS_ALLOWED: ${VAULTWARDEN_SIGNUPS_ALLOWED}
+      ADMIN_TOKEN: ${VAULTWARDEN_ADMIN_TOKEN}
+      PASSWORD_HINTS_ALLOWED: "false"
+      TZ: ${TZ}
+    volumes:
+      - vaultwarden_data:/data
+    networks:
+      - proxy
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/alive >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ----------------------------------------------------------------- immich --
+  immich-db:
+    image: ${IMMICH_DB_IMAGE}
+    container_name: pc-immich-db
+    restart: *restart
+    shm_size: 128mb
+    environment:
+      POSTGRES_DB: ${IMMICH_DB_NAME}
+      POSTGRES_USER: ${IMMICH_DB_USER}
+      POSTGRES_PASSWORD: ${IMMICH_DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - immich_db:/var/lib/postgresql/data
+    networks:
+      - immich-internal
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/postgresql
+      # The immich postgres image writes a tuned config here on every start.
+      - /etc/postgresql
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${IMMICH_DB_USER} -d ${IMMICH_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  immich-redis:
+    image: ${VALKEY_IMAGE}
+    container_name: pc-immich-redis
+    restart: *restart
+    user: "999:1000"
+    command:
+      - valkey-server
+      - --requirepass
+      - ${IMMICH_REDIS_PASSWORD}
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    environment:
+      REDISCLI_AUTH: ${IMMICH_REDIS_PASSWORD}
+    networks:
+      - immich-internal
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /data
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$REDISCLI_AUTH\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION}
+    container_name: pc-immich-server
+    restart: *restart
+    user: "1000:1000"
+    environment:
+      DB_HOSTNAME: immich-db
+      DB_USERNAME: ${IMMICH_DB_USER}
+      DB_PASSWORD: ${IMMICH_DB_PASSWORD}
+      DB_DATABASE_NAME: ${IMMICH_DB_NAME}
+      REDIS_HOSTNAME: immich-redis
+      REDIS_PASSWORD: ${IMMICH_REDIS_PASSWORD}
+      IMMICH_MACHINE_LEARNING_URL: http://immich-ml:3003
+      TZ: ${TZ}
+    volumes:
+      - immich_upload:/data
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - proxy
+      - immich-internal
+    depends_on:
+      immich-db:
+        condition: service_healthy
+      immich-redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt:
+      - no-new-privileges:true
+
+  immich-ml:
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION}
+    container_name: pc-immich-ml
+    restart: *restart
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - immich_modelcache:/cache
+    networks:
+      - proxy
+    # read_only not applied — the ML runtime's control server writes a socket on
+    # its rootfs that a read-only fs rejects. Still hardened: cap_drop ALL +
+    # no-new-privileges, no published ports. See README "Hardening".
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  # ---------------------------------------------------------------- seafile --
+  # Reliable file sync with client-side encrypted libraries (the E2EE that
+  # actually works on iOS). MariaDB + Redis are fully hardened like the other
+  # data tiers; the Seafile app image keeps init/nginx as root (see "Hardening"
+  # in the README) but runs the seaf-server/seahub daemons non-root via NON_ROOT.
+  seafile-db:
+    image: ${SEAFILE_DB_IMAGE}
+    container_name: pc-seafile-db
+    restart: *restart
+    environment:
+      MYSQL_ROOT_PASSWORD: ${SEAFILE_DB_ROOT_PASSWORD}
+      MYSQL_LOG_CONSOLE: "true"
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - seafile_db:/var/lib/mysql
+    networks:
+      - seafile-internal
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/mysqld
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  seafile-redis:
+    image: ${REDIS_IMAGE}
+    container_name: pc-seafile-redis
+    restart: *restart
+    user: "999:1000"
+    command:
+      - redis-server
+      - --requirepass
+      - ${SEAFILE_REDIS_PASSWORD}
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    environment:
+      REDISCLI_AUTH: ${SEAFILE_REDIS_PASSWORD}
+    networks:
+      - seafile-internal
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /data
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDISCLI_AUTH\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  seafile-server:
+    image: ${SEAFILE_IMAGE}
+    container_name: pc-seafile
+    restart: *restart
+    environment:
+      SEAFILE_MYSQL_DB_HOST: seafile-db
+      SEAFILE_MYSQL_DB_PORT: "3306"
+      SEAFILE_MYSQL_DB_USER: seafile
+      SEAFILE_MYSQL_DB_PASSWORD: ${SEAFILE_DB_PASSWORD}
+      INIT_SEAFILE_MYSQL_ROOT_PASSWORD: ${SEAFILE_DB_ROOT_PASSWORD}
+      SEAFILE_MYSQL_DB_CCNET_DB_NAME: ccnet_db
+      SEAFILE_MYSQL_DB_SEAFILE_DB_NAME: seafile_db
+      SEAFILE_MYSQL_DB_SEAHUB_DB_NAME: seahub_db
+      TIME_ZONE: ${TZ}
+      INIT_SEAFILE_ADMIN_EMAIL: ${SEAFILE_ADMIN_EMAIL}
+      INIT_SEAFILE_ADMIN_PASSWORD: ${SEAFILE_ADMIN_PASSWORD}
+      # Hostname includes the port so Seahub emits correct absolute URLs and
+      # CSRF origins on the non-standard local HTTPS port (harmless :443 in prod).
+      SEAFILE_SERVER_HOSTNAME: "${SEAFILE_DOMAIN}:${HTTPS_PORT}"
+      SEAFILE_SERVER_PROTOCOL: https
+      SITE_ROOT: /
+      # Drop the seaf-server/seahub daemons to uid 8000 (init/nginx stay root).
+      NON_ROOT: "true"
+      JWT_PRIVATE_KEY: ${SEAFILE_JWT_KEY}
+      SEAFILE_LOG_TO_STDOUT: "false"
+      ENABLE_GO_FILESERVER: "true"
+      # Optional extras kept off to stay lean (file sync + E2EE only).
+      ENABLE_SEADOC: "false"
+      ENABLE_NOTIFICATION_SERVER: "false"
+      ENABLE_SEAFILE_AI: "false"
+      ENABLE_FACE_RECOGNITION: "false"
+      CACHE_PROVIDER: redis
+      REDIS_HOST: seafile-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${SEAFILE_REDIS_PASSWORD}
+    volumes:
+      - seafile_data:/shared
+    networks:
+      - proxy
+      - seafile-internal
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      seafile-db:
+        condition: service_healthy
+      seafile-redis:
+        condition: service_started
+    # read_only not applied — the seafile-mc image regenerates config and runs
+    # its own nginx/my_init across the rootfs. Still hardened: cap_drop ALL +
+    # no-new-privileges + non-root daemons (NON_ROOT) + internal-only DB/cache.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, NET_BIND_SERVICE, KILL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
