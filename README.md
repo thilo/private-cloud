@@ -106,8 +106,9 @@ flip it to your email and `docker compose up -d caddy` once records resolve.
 the Let's Encrypt HTTP challenge and HTTP→HTTPS redirects. The databases sit on
 `internal:` networks with no published ports.
 
-**4. Prepare the host** (installs `cifs-utils`, adds swap if missing, creates the
-`DATA_ROOT` subdirs, and creates/validates the Storage Box subfolders):
+**4. Prepare the host** (installs `cifs-utils` and `sqlite3` — the latter for
+consistent Vaultwarden backups — adds swap if missing, creates the `DATA_ROOT`
+subdirs, and creates/validates the Storage Box subfolders):
 
 ```bash
 sudo -E ./scripts/prod-setup.sh
@@ -293,7 +294,7 @@ free, automatic snapshots for dated history** (so enable those). The bulk blobs
 are already on the box and are not re-copied. A daily `systemd` timer runs it:
 
 ```bash
-# one-time install (done by the production deploy):
+# one-time install on the server (run once):
 cp scripts/systemd/pc-backup.* /etc/systemd/system/ && systemctl daemon-reload
 systemctl enable --now pc-backup.timer
 systemctl list-timers pc-backup.timer        # next run (default 03:30 daily)
