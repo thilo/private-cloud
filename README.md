@@ -102,6 +102,73 @@ Then:
 For a CA-DNS challenge (wildcard certs / no inbound 80) build Caddy with your
 provider's DNS module and use the `tls { dns … }` directive instead.
 
+## Storage layout (cheap bulk on a Storage Box)
+
+The big, cold blobs go on a CIFS/SMB share — a Hetzner **Storage Box** is ~10–15×
+cheaper per TB than block volumes (≈ €3.20/TB vs ≈ €50/TB). The databases and the
+hot caches stay on the server's local SSD, where they belong.
+
+> **Never put a database on the Storage Box.** Postgres / MariaDB / SQLite need
+> low-latency POSIX locking that SMB cannot provide; they will corrupt or crawl. The
+> split below keeps every database local on purpose.
+
+| Data | Location | Volume(s) |
+|------|----------|-----------|
+| Immich originals (`library/`, `upload/`) | **Storage Box** (CIFS) | `immich_data` |
+| Immich thumbnails / transcoded video | local SSD | `immich_thumbs`, `immich_encoded` |
+| Seafile object store + config (`/shared/seafile`) | **Storage Box** (CIFS) | `seafile_box` |
+| Seafile logs | local SSD | `seafile_logs` |
+| All databases + Vaultwarden | local SSD | `immich_db`, `seafile_db`, `vaultwarden_data` |
+
+Immich's whole `/data` is the CIFS mount so the upload→library move stays on one
+device (no cross-device rename); `thumbs/` and `encoded-video/` are mounted back onto
+local SSD so browsing stays fast.
+
+Seafile mounts the box one level **above** its object store, at `/shared/seafile`, on
+purpose: the image runs first-time setup only when `/shared/seafile/seafile-data` is
+*absent*, so mounting the empty box there lets setup run and build the data tree on the
+box — a single `docker compose up`, no two-phase migration. The chatty per-request logs
+are carved back to local SSD (`seafile_logs`); Seafile's real metadata (libraries,
+users, file tree) lives in **MariaDB**, which stays local. Blocks are immutable
+content-addressed objects — ideal for a network share. (Seafile's config, incl.
+`seahub_settings.py`, also sits on the box — it travels over SMB to your own Storage
+Box; enable SMB encryption if that matters to you.)
+
+`nobrl` in the mount options avoids CIFS byte-range-lock errors, and the CIFS volumes
+are owned via the mount's `uid=`/`gid=` (so `volume-init` leaves them alone).
+
+### Test it locally first
+
+`docker-compose.storagebox-sim.yml` runs a throwaway **Samba** container that stands
+in for the Storage Box, so a local `docker compose up` exercises the *exact* CIFS
+mount path production uses — only `SB_HOST` differs. It's pulled in automatically by
+the `COMPOSE_FILE` line that `scripts/init.sh` writes to `.env`. Confirm the mounts
+are real CIFS:
+
+```bash
+docker exec pc-immich-server mount | grep ' /data '
+#  //172.28.0.250/backup/immich on /data type cifs (…,uid=1000,…,nobrl,…)
+docker exec pc-seafile mount | grep ' /shared/seafile '
+```
+
+### Switch to a real Storage Box
+
+1. In the Storage Box settings, **enable Samba/CIFS** support, then create the two
+   subfolders once (the CIFS mount of a missing subpath fails):
+   ```bash
+   sftp -P23 u123456@u123456.your-storagebox.de   # then:  mkdir immich   mkdir seafile
+   ```
+2. In `.env`, point at the box and drop the simulator:
+   ```ini
+   SB_HOST=u123456.your-storagebox.de
+   SB_SHARE=backup
+   SB_USER=u123456
+   SB_PASSWORD=…              # Storage Box (or sub-account) password
+   # delete the COMPOSE_FILE=… line so the local Samba sim is no longer included
+   ```
+3. Put the Storage Box in the **same Hetzner location** as the server to minimise
+   latency; traffic between them is free.
+
 ## Hardening
 
 Applied to every service: `security_opt: no-new-privileges`, `cap_drop: ALL`
@@ -135,17 +202,26 @@ stock image requires.
 
 ## Resource limits (fits a 4 GB host)
 
-The stack is tuned to run on a **4 GB** machine. Every long-running service has a
-`mem_limit` (a hard ceiling — ceilings, not reservations) so no single service
-can balloon and trigger the host OOM-killer; the caps sum to ~3.8 GB, leaving
-headroom for the OS and page cache. Steady-state usage is **≈ 1.3–1.4 GB**.
+The stack is tuned to run on a **4 GB** machine (e.g. a Hetzner **CX22**). Every
+long-running service has a `mem_limit` (a hard ceiling, not a reservation) so no single
+service can balloon and OOM the host. Steady-state usage is **≈ 1.3–1.4 GB**; the
+ceilings deliberately *over-subscribe* (they sum to ~4.2 GB) because they are not all
+hit at once — the largest spike, immich-db's one-time first-boot geodata import, lands
+while the ML model is still idle.
+
+> On a 4 GB host, also add a small **swap file** so a rare concurrent spike degrades to
+> swap instead of an OOM kill:
+> ```bash
+> fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+> echo '/swapfile none swap sw 0 0' >> /etc/fstab
+> ```
 
 | Service | `mem_limit` | Tuning |
 |---------|-------------|--------|
 | immich-server | 1024M | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap) |
 | immich-ml | 1024M | idle-model unload (`MODEL_TTL=300`), 1 worker, serialized inference |
 | seafile-server | 640M | seahub gunicorn workers 5→2 (`scripts/tune-seafile.sh`) |
-| immich-db | 512M | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM |
+| immich-db | 768M | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM. 768M (not 512M) clears the one-time first-boot reverse-geocoding import, which peaks ~680M |
 | seafile-db | 320M | MariaDB `innodb_buffer_pool=96M`, `performance_schema=OFF` |
 | caddy / vaultwarden / immich-redis / seafile-redis | 96M each | seafile-redis is a pure cache (`maxmemory 48M` + LRU); immich-redis is the BullMQ job broker, so it is **not** evicted |
 
@@ -172,15 +248,20 @@ docker compose down                                 # stop (keeps volumes/data)
 docker compose pull && docker compose up -d         # update images
 ```
 
-**Backups:** persistent data lives in named volumes — `seafile_data`,
-`seafile_db`, `immich_upload`, `immich_db`, `vaultwarden_data`. Snapshot these
-(stop the stack or use DB dumps for consistency). `.env` holds the secrets —
-back it up securely and separately.
+**Backups:** the **local** volumes hold the databases + metadata — `immich_db`,
+`seafile_db`, `vaultwarden_data`, `immich_thumbs`, `immich_encoded`, `seafile_logs`
+(snapshot these, or dump the DBs for consistency — note Seafile is useless without its
+MariaDB `seafile_db`, even though the blocks are on the box). The bulk blobs live on
+the **Storage Box** (`immich_data` = photo/video originals, `seafile_box` = Seafile's
+object store + config). **A live Storage Box mount is not a backup** — enable the box's
+scheduled **snapshots** so a deletion or ransomware event is recoverable. `.env` holds
+the secrets — back it up securely and separately.
 
 ## Files
 
 ```
 docker-compose.yml     all services, hardening, networks, volumes
+docker-compose.storagebox-sim.yml  local Samba server that simulates the Storage Box
 .env.example           config template (copy → .env via scripts/init.sh)
 caddy/Caddyfile        reverse proxy + automatic HTTPS
 scripts/init.sh        generate .env secrets

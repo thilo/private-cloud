@@ -32,6 +32,7 @@ set_kv SEAFILE_DB_PASSWORD      "$(gen)"
 set_kv SEAFILE_REDIS_PASSWORD   "$(gen)"
 set_kv SEAFILE_JWT_KEY          "$(gen 44)"
 set_kv SEAFILE_ADMIN_PASSWORD   "$(gen 24)"
+set_kv SB_PASSWORD              "$(gen)"
 
 chmod 600 "$ENV_FILE"
 

@@ -34,11 +34,35 @@ volumes:
   caddy_data:
   caddy_config:
   vaultwarden_data:
-  immich_upload:
   immich_db:
   immich_modelcache:
-  seafile_data:
   seafile_db:
+  # Local SSD — latency-sensitive data that must NOT live on the (network) Storage
+  # Box: the databases above, plus Seafile's conf/metadata and Immich's hot,
+  # constantly-read derivatives.
+  seafile_data:      # Seafile /shared parent (the seafile_box mount nests under it)
+  seafile_logs:      # Seafile logs — kept local (per-request access logs are chatty)
+  immich_thumbs:     # Immich thumbnails (read on every grid/scroll)
+  immich_encoded:    # Immich transcoded video
+
+  # Storage Box — cheap bulk blobs over CIFS/SMB. ${SB_*} come from .env.
+  #   LOCAL : docker-compose.storagebox-sim.yml runs a Samba server at ${SB_HOST}.
+  #   PROD  : ${SB_HOST} = u<id>.your-storagebox.de (a Hetzner Storage Box).
+  # Ownership is fixed by the mount's uid=/gid= (CIFS can't be chown'd), so this is
+  # NOT touched by volume-init. nobrl avoids CIFS byte-range-lock errors; the
+  # databases live on local SSD precisely so they never need locking over SMB.
+  immich_data:       # Immich originals: library/ + upload/ (uid 1000)
+    driver: local
+    driver_opts:
+      type: cifs
+      device: "//${SB_HOST}/${SB_SHARE}/immich"
+      o: "username=${SB_USER},password=${SB_PASSWORD},uid=1000,gid=1000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,iocharset=utf8"
+  seafile_box:       # Seafile data tree: object store + conf + seahub-data (uid 8000)
+    driver: local
+    driver_opts:
+      type: cifs
+      device: "//${SB_HOST}/${SB_SHARE}/seafile"
+      o: "username=${SB_USER},password=${SB_PASSWORD},uid=8000,gid=8000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,iocharset=utf8"
 
 services:
 
@@ -84,17 +108,21 @@ services:
         condition: service_started
 
   # ------------------------------------------------------------ vaultwarden --
-  # One-shot chowner so the non-root services own their data volumes before they
-  # start: vaultwarden + immich-server run as uid 1000, seafile's daemons as uid
-  # 8000 (Seafile's NON_ROOT mode refuses to start unless /shared is writable).
+  # One-shot chowner so the non-root services own their LOCAL data volumes before
+  # they start: vaultwarden + immich run as uid 1000, seafile's daemons as uid 8000
+  # (Seafile's NON_ROOT mode refuses to start unless /shared is writable). The CIFS
+  # Storage Box volume (immich_data) is excluded — its ownership comes from the
+  # mount's uid=, and CIFS can't be chown'd anyway.
   volume-init:
     image: alpine:3.20
     container_name: pc-volume-init
-    command: ["sh", "-c", "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich && chown -R 8000:8000 /seafile"]
+    command: ["sh", "-c", "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded && chown -R 8000:8000 /seafile /seafile-logs"]
     volumes:
       - vaultwarden_data:/vw
-      - immich_upload:/immich
+      - immich_thumbs:/immich-thumbs
+      - immich_encoded:/immich-encoded
       - seafile_data:/seafile
+      - seafile_logs:/seafile-logs
     restart: "no"
     security_opt:
       - no-new-privileges:true
@@ -139,7 +167,10 @@ services:
     image: ${IMMICH_DB_IMAGE}
     container_name: pc-immich-db
     restart: *restart
-    mem_limit: 512m
+    # 768M (not 512M): steady state is ~100M, but Immich's one-time first-boot
+    # reverse-geocoding import (geodata_places) peaks at ~680M. A 512M cap OOM-kills
+    # that import on a fresh DB (signal 9 mid-INSERT). 768M clears it with headroom.
+    mem_limit: 768m
     shm_size: 128mb
     # Pin memory so the image does not auto-tune shared_buffers/effective_cache_size
     # to the host's total RAM (it would grab ~25% of the 4 GB box otherwise). We
@@ -244,12 +275,19 @@ services:
       IMMICH_MACHINE_LEARNING_URL: http://immich-ml:3003
       TZ: ${TZ}
     volumes:
-      - immich_upload:/data
+      # Originals on the Storage Box; hot derivatives carved back to local SSD.
+      # /data itself is the CIFS mount, so Immich's upload->library move stays
+      # intra-device (no cross-device rename); thumbs + transcodes are local.
+      - immich_data:/data
+      - immich_thumbs:/data/thumbs
+      - immich_encoded:/data/encoded-video
       - /etc/localtime:/etc/localtime:ro
     networks:
       - proxy
       - immich-internal
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       immich-db:
         condition: service_healthy
       immich-redis:
@@ -400,6 +438,13 @@ services:
       REDIS_PASSWORD: ${SEAFILE_REDIS_PASSWORD}
     volumes:
       - seafile_data:/shared
+      # Mount the Storage Box one level ABOVE seafile-data: the bootstrap skips
+      # first-run setup iff /shared/seafile/seafile-data exists, so mounting the
+      # (empty) box at /shared/seafile lets setup run and create seafile-data on the
+      # box — single-shot, no two-phase. DB metadata stays in MariaDB (local); logs
+      # go to a local volume (below) so nothing chatty is written over CIFS.
+      - seafile_box:/shared/seafile
+      - seafile_logs:/shared/seafile/logs
     networks:
       - proxy
       - seafile-internal

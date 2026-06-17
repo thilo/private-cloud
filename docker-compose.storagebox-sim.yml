@@ -1,0 +1,74 @@
+# Local simulation of a Hetzner Storage Box.
+#
+# A Storage Box is network storage reached over SMB/CIFS (among SFTP/WebDAV/...).
+# This file stands in a local Samba server so you can exercise the EXACT CIFS mount
+# path the production stack uses — only ${SB_HOST} differs (a container IP here,
+# u<id>.your-storagebox.de in production).
+#
+# It is pulled into every `docker compose` automatically for local runs via
+# COMPOSE_FILE in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.storagebox-sim.yml
+# In production, delete that COMPOSE_FILE line so ONLY the real Storage Box is used.
+
+name: private-cloud
+
+volumes:
+  storagebox_data:
+
+services:
+  # Pre-create the per-app subfolders the CIFS volumes mount (backup/immich,
+  # backup/seafile). On a real Storage Box you create these once over SFTP/SMB.
+  storagebox-init:
+    image: alpine:3.20
+    container_name: pc-storagebox-init
+    command: ["sh", "-c", "mkdir -p /s/immich /s/seafile && chmod -R 0777 /s"]
+    volumes:
+      - storagebox_data:/s
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  # The simulated Storage Box: a Samba server exporting //${SB_HOST}/${SB_SHARE}.
+  # Reachable by the Docker host at a fixed IP so the CIFS mount (performed by the
+  # host, not inside a container) can resolve it. The IP must sit inside
+  # PROXY_SUBNET and match SB_HOST in .env.
+  storagebox:
+    image: dperson/samba
+    container_name: pc-storagebox
+    restart: unless-stopped
+    mem_limit: 128m
+    command:
+      - "-p"                                              # set ownership on shares
+      - "-n"                                              # advertise via nmbd
+      - "-u"
+      - "${SB_USER};${SB_PASSWORD}"
+      - "-s"
+      - "${SB_SHARE};/shares;yes;no;no;${SB_USER}"        # name;path;browse;ro;guest;users
+    volumes:
+      - storagebox_data:/shares
+    networks:
+      proxy:
+        ipv4_address: 172.28.0.250
+    depends_on:
+      storagebox-init:
+        condition: service_completed_successfully
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pidof smbd >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  # The two apps must wait for the simulated box before their CIFS volumes mount.
+  # (Merged into the base service definitions; in production these depends_on the
+  # real box implicitly — the mount simply targets SB_HOST.)
+  immich-server:
+    depends_on:
+      storagebox:
+        condition: service_healthy
+  seafile-server:
+    depends_on:
+      storagebox:
+        condition: service_healthy
