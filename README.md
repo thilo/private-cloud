@@ -282,6 +282,27 @@ is not a backup** — enable the box's scheduled **snapshots** so a deletion or 
 event is recoverable. `.env` / `.env.production` hold the secrets — back them up
 securely and separately.
 
+**Automated backup (`scripts/backup.sh`):** writes *consistent* dumps of the
+attached-volume state to `backup/backups/` on the Storage Box — `pg_dump`
+(Immich), `mariadb-dump --single-transaction` of all three Seafile DBs, a SQLite
+`.backup` of Vaultwarden plus its data folder, and Caddy's TLS material. Each
+artifact is written to a `.partial` file, verified (`gzip -t`), then atomically
+renamed, and a `backup-manifest.txt` (sizes + sha256) is written last as the
+completion marker. It overwrites a single latest set and **relies on the box's
+free, automatic snapshots for dated history** (so enable those). The bulk blobs
+are already on the box and are not re-copied. A daily `systemd` timer runs it:
+
+```bash
+# one-time install (done by the production deploy):
+cp scripts/systemd/pc-backup.* /etc/systemd/system/ && systemctl daemon-reload
+systemctl enable --now pc-backup.timer
+systemctl list-timers pc-backup.timer        # next run (default 03:30 daily)
+journalctl -u pc-backup.service -n 20         # last run
+source scripts/prod.env && sudo -E ./scripts/backup.sh   # run on demand
+```
+
+Restore steps are documented in the header of `scripts/backup.sh`.
+
 ## Files
 
 ```
@@ -293,7 +314,9 @@ docker-compose.storagebox-sim.yml  local Samba server that simulates the Storage
 caddy/Caddyfile        reverse proxy + automatic HTTPS
 scripts/init.sh        generate env-file secrets (.env or .env.production)
 scripts/prod.env       source to point compose + scripts at production
-scripts/prod-setup.sh  one-time host prep (cifs-utils, swap, DATA_ROOT dirs, Storage Box folders)
+scripts/prod-setup.sh  one-time host prep (cifs-utils, sqlite3, swap, DATA_ROOT dirs, Storage Box folders)
+scripts/backup.sh      consistent DB/Vaultwarden/Caddy backup to the Storage Box
+scripts/systemd/       pc-backup.service + .timer (daily backup)
 scripts/bootstrap.sh   create the Immich admin
 scripts/tune-seafile.sh  cut seahub gunicorn workers to fit 4 GB (run after fresh setup)
 scripts/verify.sh      the three acceptance tests

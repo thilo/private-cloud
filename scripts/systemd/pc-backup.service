@@ -1,0 +1,12 @@
+[Unit]
+Description=private-cloud backup to the Storage Box
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/private-cloud
+# ENV_FILE is read by backup.sh; prod.env's exports are not needed for a dump.
+Environment=ENV_FILE=.env.production
+ExecStart=/opt/private-cloud/scripts/backup.sh
