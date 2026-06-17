@@ -1,0 +1,57 @@
+# Production overlay — pins the latency-sensitive volumes onto the attached
+# block volume (a Hetzner Volume), keeps temp/logs on the host's root disk, and
+# leaves the bulk-blob CIFS volumes (immich_data, seafile_box) exactly as the
+# base file defines them (they already target the real Storage Box via ${SB_*}).
+#
+# Use it together with the base file and the production env file, e.g.:
+#   source scripts/prod.env        # sets COMPOSE_FILE + COMPOSE_ENV_FILES + ENV_FILE
+#   docker compose up -d
+# or explicitly:
+#   docker compose --env-file .env.production \
+#     -f docker-compose.yml -f docker-compose.production.yml up -d
+#
+# ${DATA_ROOT} (set in .env.production) is a directory ON THE ATTACHED VOLUME.
+# Each subdirectory MUST exist before `up` — the local `o: bind` driver does not
+# create it. scripts/prod-setup.sh creates them; ownership is then fixed by the
+# stack's existing volume-init / image entrypoints (same as with named volumes,
+# since a bind mount shares the host inode).
+#
+# Why these volumes and not the others:
+#   on the attached volume  -> databases + Vaultwarden + Seafile conf/metadata +
+#                              Immich hot derivatives (thumbs/encoded) + Caddy's
+#                              TLS material (must persist — re-issuing hits LE
+#                              rate limits) + the ML model cache.
+#   on the host root disk   -> seafile_logs (chatty per-request logs) stays a
+#                              plain named volume; tmpfs handles scratch.
+#   on the Storage Box      -> immich_data, seafile_box (defined in the base file).
+
+name: private-cloud
+
+volumes:
+  caddy_data:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/caddy_data" }
+  caddy_config:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/caddy_config" }
+  vaultwarden_data:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/vaultwarden_data" }
+  immich_db:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/immich_db" }
+  immich_modelcache:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/immich_modelcache" }
+  immich_thumbs:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/immich_thumbs" }
+  immich_encoded:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/immich_encoded" }
+  seafile_db:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/seafile_db" }
+  seafile_data:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/seafile_data" }

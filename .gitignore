@@ -1,5 +1,6 @@
 # Secrets and generated runtime config — never commit
 .env
+.env.production
 secrets/
 
 # Local CA export / scratch

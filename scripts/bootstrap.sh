@@ -5,7 +5,7 @@
 # and its encrypted libraries are client-side, so it needs no bootstrap step.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . ./.env; set +a
+set -a; . "${ENV_FILE:-./.env}"; set +a
 
 curlk() {
   curl -sS -k --resolve "${IMMICH_DOMAIN}:${HTTPS_PORT}:127.0.0.1" "$@"

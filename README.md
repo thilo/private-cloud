@@ -74,30 +74,53 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 
 ## Production deployment
 
-Edit `.env`:
+Production uses a **separate env file** (`.env.production`) and a small **compose
+overlay** (`docker-compose.production.yml`) that pins the latency-sensitive
+volumes onto an **attached block volume** (e.g. a Hetzner Volume) while logs/temp
+stay on the host root disk and the bulk blobs stay on the Storage Box. The base
+`docker-compose.yml` is unchanged between local and production.
 
-```ini
-HTTP_PORT=80
-HTTPS_PORT=443
-CADDY_TLS=you@example.com                 # switches Caddy to Let's Encrypt
-SEAFILE_DOMAIN=files.example.com
-IMMICH_DOMAIN=photos.example.com
-VAULTWARDEN_DOMAIN=vault.example.com
-VAULTWARDEN_URL=https://vault.example.com
+**1. Configure.** Generate `.env.production` with fresh secrets, then set your
+domains, the Let's Encrypt email, the Storage Box password, and `DATA_ROOT` (a
+directory on the attached volume):
+
+```bash
+ENV_FILE=.env.production EXAMPLE=.env.production.example GEN_SB_PASSWORD=0 \
+  ./scripts/init.sh
+$EDITOR .env.production          # set domains, CADDY_TLS, SB_PASSWORD, DATA_ROOT
 ```
 
-Then:
+The `prod.env` switch points every later command at production (base + overlay +
+`.env.production`):
 
-1. **DNS** – point the names at your server's public IP (A/AAAA records).
-   - *Fixed IP:* set the records once.
-   - *Dynamic IP:* use your router's DDNS, or run a small updater
-     (e.g. `qmcgaw/ddns-updater`) — not bundled here so you can match your DNS
-     provider. Caddy obtains/renews certs automatically either way.
-2. **Ports** – forward TCP **80 and 443** from your router to the host. Port 80
-   is needed for the Let's Encrypt HTTP challenge and for HTTP→HTTPS redirects.
-3. **Firewall** – only 80/443 need to be exposed; the databases are on
-   `internal:` networks with no published ports.
-4. `docker compose up -d && ./scripts/bootstrap.sh`.
+```bash
+source scripts/prod.env          # sets COMPOSE_FILE / COMPOSE_ENV_FILES / ENV_FILE
+```
+
+**2. DNS.** Point each name at the server's public IP with an **A record**
+(AAAA too if the host has IPv6). Caddy then obtains/renews Let's Encrypt certs
+automatically. Deploy before DNS is ready by setting `CADDY_TLS=internal`, then
+flip it to your email and `docker compose up -d caddy` once records resolve.
+
+**3. Ports / firewall.** Expose TCP **80 and 443** only. Port 80 is needed for
+the Let's Encrypt HTTP challenge and HTTP→HTTPS redirects. The databases sit on
+`internal:` networks with no published ports.
+
+**4. Prepare the host** (installs `cifs-utils`, adds swap if missing, creates the
+`DATA_ROOT` subdirs, and creates/validates the Storage Box subfolders):
+
+```bash
+sudo -E ./scripts/prod-setup.sh
+```
+
+**5. Bring it up:**
+
+```bash
+docker compose up -d
+./scripts/bootstrap.sh           # create the Immich admin
+./scripts/tune-seafile.sh        # cut seahub workers to 2 (after fresh setup)
+./scripts/verify.sh              # acceptance tests
+```
 
 For a CA-DNS challenge (wildcard certs / no inbound 80) build Caddy with your
 provider's DNS module and use the `tls { dns … }` directive instead.
@@ -153,18 +176,18 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
 
 ### Switch to a real Storage Box
 
-1. In the Storage Box settings, **enable Samba/CIFS** support, then create the two
-   subfolders once (the CIFS mount of a missing subpath fails):
+In production the base file's CIFS volumes already target the real box via the
+`SB_*` values in `.env.production`; there is no simulator to remove (the
+production overlay simply never includes `docker-compose.storagebox-sim.yml`).
+
+1. In the Storage Box settings, **enable Samba/CIFS** support and set `SB_HOST` /
+   `SB_USER` / `SB_PASSWORD` in `.env.production`.
+2. The host needs `cifs-utils`, and the `immich/` and `seafile/` subfolders must
+   exist on the share before first `up` (a CIFS mount of a missing subpath
+   fails). Both are handled by `scripts/prod-setup.sh`; to do it by hand:
    ```bash
+   sudo apt-get install -y cifs-utils
    sftp -P23 u123456@u123456.your-storagebox.de   # then:  mkdir immich   mkdir seafile
-   ```
-2. In `.env`, point at the box and drop the simulator:
-   ```ini
-   SB_HOST=u123456.your-storagebox.de
-   SB_SHARE=backup
-   SB_USER=u123456
-   SB_PASSWORD=…              # Storage Box (or sub-account) password
-   # delete the COMPOSE_FILE=… line so the local Samba sim is no longer included
    ```
 3. Put the Storage Box in the **same Hetzner location** as the server to minimise
    latency; traffic between them is free.
@@ -248,23 +271,29 @@ docker compose down                                 # stop (keeps volumes/data)
 docker compose pull && docker compose up -d         # update images
 ```
 
-**Backups:** the **local** volumes hold the databases + metadata — `immich_db`,
-`seafile_db`, `vaultwarden_data`, `immich_thumbs`, `immich_encoded`, `seafile_logs`
-(snapshot these, or dump the DBs for consistency — note Seafile is useless without its
-MariaDB `seafile_db`, even though the blocks are on the box). The bulk blobs live on
-the **Storage Box** (`immich_data` = photo/video originals, `seafile_box` = Seafile's
-object store + config). **A live Storage Box mount is not a backup** — enable the box's
-scheduled **snapshots** so a deletion or ransomware event is recoverable. `.env` holds
-the secrets — back it up securely and separately.
+**Backups:** the **fast** volumes hold the databases + metadata — `immich_db`,
+`seafile_db`, `vaultwarden_data`, `seafile_data`, `immich_thumbs`, `immich_encoded`
+(in production these live under `DATA_ROOT` on the attached volume; `seafile_logs` is
+on the host root disk). Snapshot the attached volume, or dump the DBs for consistency —
+note Seafile is useless without its MariaDB `seafile_db`, even though the blocks are on
+the box. The bulk blobs live on the **Storage Box** (`immich_data` = photo/video
+originals, `seafile_box` = Seafile's object store + config). **A live Storage Box mount
+is not a backup** — enable the box's scheduled **snapshots** so a deletion or ransomware
+event is recoverable. `.env` / `.env.production` hold the secrets — back them up
+securely and separately.
 
 ## Files
 
 ```
 docker-compose.yml     all services, hardening, networks, volumes
+docker-compose.production.yml      production overlay: bind fast volumes to the attached volume
 docker-compose.storagebox-sim.yml  local Samba server that simulates the Storage Box
-.env.example           config template (copy → .env via scripts/init.sh)
+.env.example           local config template (copy → .env via scripts/init.sh)
+.env.production.example production config template (copy → .env.production)
 caddy/Caddyfile        reverse proxy + automatic HTTPS
-scripts/init.sh        generate .env secrets
+scripts/init.sh        generate env-file secrets (.env or .env.production)
+scripts/prod.env       source to point compose + scripts at production
+scripts/prod-setup.sh  one-time host prep (cifs-utils, swap, DATA_ROOT dirs, Storage Box folders)
 scripts/bootstrap.sh   create the Immich admin
 scripts/tune-seafile.sh  cut seahub gunicorn workers to fit 4 GB (run after fresh setup)
 scripts/verify.sh      the three acceptance tests

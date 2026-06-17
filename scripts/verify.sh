@@ -5,7 +5,7 @@
 #   3. Seafile    — sync a local file (same Web API the desktop/iOS clients use)
 set -uo pipefail
 cd "$(dirname "$0")/.."
-set -a; . ./.env; set +a
+set -a; . "${ENV_FILE:-./.env}"; set +a
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
