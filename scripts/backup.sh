@@ -18,12 +18,8 @@
 # Run:        source scripts/prod.env && sudo -E ./scripts/backup.sh
 # Scheduled:  installed as a daily systemd timer (scripts/systemd/pc-backup.*).
 #
-# RESTORE (summary; do into a freshly-initialised stack):
-#   Immich:      gunzip -c immich-db.sql.gz   | docker exec -i pc-immich-db   psql -U immich -d immich
-#   Seafile:     gunzip -c seafile-db.sql.gz  | docker exec -i -e MYSQL_PWD=<root-pw> pc-seafile-db mariadb -u root
-#   Vaultwarden: docker compose stop vaultwarden; tar xzf vaultwarden.tar.gz -C $DATA_ROOT/vaultwarden_data; \
-#                docker compose up -d vaultwarden
-#   Caddy:       tar xzf caddy_data.tar.gz -C $DATA_ROOT/caddy_data   (optional)
+# RESTORE: use scripts/restore.sh (run `restore.sh --check` first to verify the
+# latest backup is intact and restorable without changing anything).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; . "${ENV_FILE:-.env.production}"; set +a

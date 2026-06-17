@@ -301,7 +301,22 @@ journalctl -u pc-backup.service -n 20         # last run
 source scripts/prod.env && sudo -E ./scripts/backup.sh   # run on demand
 ```
 
-Restore steps are documented in the header of `scripts/backup.sh`.
+**Restore (`scripts/restore.sh`):** reverses the backup — `pg_dump` reload (drop
++ recreate the Immich DB), `mariadb` reload of the Seafile DBs, and replacing the
+Vaultwarden / Caddy data folders (then chowning Vaultwarden back to uid 1000). It
+stops only the services it touches and restarts them. Restore is destructive, so
+it prompts for confirmation (or pass `--yes`); restore a subset with
+`./scripts/restore.sh vaultwarden --yes`.
+
+```bash
+source scripts/prod.env
+sudo -E ./scripts/restore.sh --check        # verify-only: checksums + load the
+                                            # Immich dump into a scratch DB + SQLite
+                                            # integrity check, WITHOUT changing anything
+sudo -E ./scripts/restore.sh --yes          # restore everything
+```
+
+Run `--check` periodically to confirm the latest backup is actually restorable.
 
 ## Files
 
@@ -316,6 +331,7 @@ scripts/init.sh        generate env-file secrets (.env or .env.production)
 scripts/prod.env       source to point compose + scripts at production
 scripts/prod-setup.sh  one-time host prep (cifs-utils, sqlite3, swap, DATA_ROOT dirs, Storage Box folders)
 scripts/backup.sh      consistent DB/Vaultwarden/Caddy backup to the Storage Box
+scripts/restore.sh     restore from the Storage Box (--check verifies without changing anything)
 scripts/systemd/       pc-backup.service + .timer (daily backup)
 scripts/bootstrap.sh   create the Immich admin
 scripts/tune-seafile.sh  cut seahub gunicorn workers to fit 4 GB (run after fresh setup)
