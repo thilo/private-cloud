@@ -1,7 +1,7 @@
 # Personal Cloud
 
-Self-hosted **Seafile** (reliable file sync with client-side encrypted libraries
-— the E2EE that actually works on iOS), **Immich** (photo backup for iPhone), and
+Self-hosted **Seafile** (file sync with client-side encrypted libraries),
+**Immich** (photo backup for iPhone), and
 **Vaultwarden** (Bitwarden-compatible passwords with 2FA) behind a single
 **Caddy** reverse proxy that serves **HTTPS for everything**. One `docker
 compose`, hardened containers, runnable locally or on a real server.
@@ -63,9 +63,7 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
   `https://seafile.…`, log in as `admin@example.com` (see `.env`). For E2EE,
   create an **encrypted library** (set a library password) — the password never
   leaves your device, so the server only ever stores ciphertext. The iOS app
-  prompts for that password to unlock the library. This is the reliable
-  encrypted file sync for the iPhone (Nextcloud's E2EE is unreliable on iOS,
-  which is why this stack uses Seafile instead).
+  prompts for that password to unlock the library.
 - **Immich (iOS):** App Store → Immich → server URL = your `https://immich.…`,
   log in, enable background backup of your camera roll.
 - **Vaultwarden (Bitwarden apps):** in any Bitwarden client set *Self-hosted* →
@@ -130,7 +128,7 @@ provider's DNS module and use the `tls { dns … }` directive instead.
 
 The big, cold blobs go on a CIFS/SMB share — a Hetzner **Storage Box** is ~10–15×
 cheaper per TB than block volumes (≈ €3.20/TB vs ≈ €50/TB). The databases and the
-hot caches stay on the server's local SSD, where they belong.
+hot caches stay on the server's local SSD.
 
 > **Never put a database on the Storage Box.** Postgres / MariaDB / SQLite need
 > low-latency POSIX locking that SMB cannot provide; they will corrupt or crawl. The
@@ -154,7 +152,7 @@ purpose: the image runs first-time setup only when `/shared/seafile/seafile-data
 box — a single `docker compose up`, no two-phase migration. The chatty per-request logs
 are carved back to local SSD (`seafile_logs`); Seafile's real metadata (libraries,
 users, file tree) lives in **MariaDB**, which stays local. Blocks are immutable
-content-addressed objects — ideal for a network share. (Seafile's config, incl.
+content-addressed objects. (Seafile's config, incl.
 `seahub_settings.py`, also sits on the box — it travels over SMB to your own Storage
 Box; enable SMB encryption if that matters to you.)
 
@@ -238,7 +236,7 @@ rejected once one exists, so after `bootstrap.sh` runs it is already closed — 
 
 The Immich **system settings** (version-check, machine learning, sharing, etc.)
 are deliberately *not* pinned via `IMMICH_CONFIG_FILE` — they stay editable in the
-admin UI at Immich's own defaults, which are already sensible. Harden them there
+admin UI at Immich's own defaults. Harden them there
 if you want (e.g. turn the GitHub version-check off for less egress).
 
 ## Resource limits (fits a 4 GB host)
