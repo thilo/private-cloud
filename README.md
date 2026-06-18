@@ -275,7 +275,16 @@ reduction once it's bootstrapped:
 
 ```bash
 ./scripts/tune-seafile.sh          # cuts seahub gunicorn workers to 2 (~430 MB)
+./scripts/harden-seafile.sh        # writes the Seahub security block + restarts
 ```
+
+`harden-seafile.sh` adds settings the `seafile-mc` image won't take from compose
+`environment:` — secure/SameSite cookies, password-strength + login-attempt limits,
+2FA availability, and forced-password/bounded-expiry share & upload links — into
+`conf/seahub_settings.py`. It's idempotent (re-running replaces its managed block);
+edit the script, not the generated file. Two self-lockout-prone options
+(`FREEZE_USER_ON_LOGIN_FAILED`, force-2FA) are left commented — enabling them breaks
+the admin password→token API login that the clients and `verify.sh` use.
 
 To give a >4 GB host more cache, raise the `immich-db` `shared_buffers` /
 `effective_cache_size` and the per-service `mem_limit`s proportionally.
@@ -353,6 +362,7 @@ scripts/restore.sh     restore from the Storage Box (--check verifies without ch
 scripts/systemd/       pc-backup.service + .timer (daily backup)
 scripts/bootstrap.sh   create the Immich admin
 scripts/tune-seafile.sh  cut seahub gunicorn workers to fit 4 GB (run after fresh setup)
+scripts/harden-seafile.sh  write Seahub security settings to seahub_settings.py (idempotent)
 scripts/verify.sh      the three acceptance tests
 scripts/vw-test.mjs    Bitwarden-client crypto used by the password test
 ```
