@@ -147,6 +147,14 @@ services:
       SIGNUPS_ALLOWED: ${VAULTWARDEN_SIGNUPS_ALLOWED}
       ADMIN_TOKEN: ${VAULTWARDEN_ADMIN_TOKEN}
       PASSWORD_HINTS_ALLOWED: "false"
+      # Caddy is the only upstream and sets X-Forwarded-For; the default
+      # (X-Real-IP) is never set, so every request would otherwise look like it
+      # comes from Caddy's IP — collapsing the login rate-limiter to a single
+      # global bucket and hiding real client IPs from the logs.
+      IP_HEADER: X-Forwarded-For
+      # Serve API only — disable the standalone web vault UI to shed that
+      # client-side surface. Browser extensions and native apps still work.
+      WEB_VAULT_ENABLED: "false"
       TZ: ${TZ}
     volumes:
       - vaultwarden_data:/data
