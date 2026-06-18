@@ -224,6 +224,23 @@ additionally drops its data daemons (`seaf-server`, `seahub`, `fileserver`) to a
 non-root uid; only the bundled `my_init`/nginx master remain root, which the
 stock image requires.
 
+On top of the container controls, Immich runs with these application-level
+settings (all on `immich-server`):
+
+| Setting | Effect |
+|---------|--------|
+| `IMMICH_VERSION` pinned (was `release`) | server + machine-learning no longer float a moving tag; bump deliberately |
+| `IMMICH_TRUSTED_PROXIES=${PROXY_SUBNET}` | Immich reads the real client IP from Caddy's `X-Forwarded-For`, so the login rate-limiter and audit logs see the client rather than the proxy |
+
+The `/api/auth/admin-sign-up` endpoint only ever creates the *first* admin and is
+rejected once one exists, so after `bootstrap.sh` runs it is already closed — no
+`IMMICH_ALLOW_SETUP` flag is needed.
+
+The Immich **system settings** (version-check, machine learning, sharing, etc.)
+are deliberately *not* pinned via `IMMICH_CONFIG_FILE` — they stay editable in the
+admin UI at Immich's own defaults, which are already sensible. Harden them there
+if you want (e.g. turn the GitHub version-check off for less egress).
+
 ## Resource limits (fits a 4 GB host)
 
 The stack is tuned to run on a **4 GB** machine (e.g. a Hetzner **CX22**). Every

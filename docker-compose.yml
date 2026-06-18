@@ -288,6 +288,14 @@ services:
       REDIS_PASSWORD: ${IMMICH_REDIS_PASSWORD}
       IMMICH_MACHINE_LEARNING_URL: http://immich-ml:3003
       TZ: ${TZ}
+      # Hardening: TRUSTED_PROXIES lets Immich read the real client IP from Caddy's
+      # X-Forwarded-For (login rate-limiter + audit logs see the client, not the
+      # proxy). PROXY_SUBNET is the only network Caddy reaches it on. The
+      # admin-sign-up endpoint self-closes once bootstrap.sh creates the first
+      # admin, so IMMICH_ALLOW_SETUP is left at Immich's default. System settings
+      # (version-check, ML, sharing, …) stay editable in the admin UI at Immich's
+      # defaults — NOT pinned via a config file.
+      IMMICH_TRUSTED_PROXIES: ${PROXY_SUBNET}
     volumes:
       # Originals on the Storage Box; hot derivatives carved back to local SSD.
       # /data itself is the CIFS mount, so Immich's upload->library move stays
