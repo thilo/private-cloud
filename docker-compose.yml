@@ -275,6 +275,7 @@ services:
     container_name: pc-immich-server
     restart: *restart
     mem_limit: 1024m
+    cpus: "1.5"
     user: "1000:1000"
     environment:
       # Cap the V8 heap below the mem_limit so Node garbage-collects under pressure
@@ -327,6 +328,7 @@ services:
     container_name: pc-immich-ml
     restart: *restart
     mem_limit: 1024m
+    cpus: "0.75"
     environment:
       TZ: ${TZ}
       # Keep the ML peak bounded for the 4 GB box: unload idle models after 5 min,
@@ -355,7 +357,9 @@ services:
     image: ${SEAFILE_DB_IMAGE}
     container_name: pc-seafile-db
     restart: *restart
-    mem_limit: 320m
+    # innodb-buffer-pool-size is hard-capped at 96M below; 160M gives ~64M headroom
+    # for per-connection overhead, sort buffers, and the MariaDB process itself.
+    mem_limit: 160m
     # Trim MariaDB's footprint (the entrypoint prepends `mariadbd` to these flags).
     command:
       - --innodb-buffer-pool-size=96M
