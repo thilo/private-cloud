@@ -88,8 +88,16 @@ ENV_FILE=.env.production EXAMPLE=.env.production.example GEN_SB_PASSWORD=0 \
 $EDITOR .env.production          # set domains, CADDY_TLS, SB_PASSWORD, DATA_ROOT
 ```
 
+Then copy it to the server **outside the deploy directory** so rsync updates never
+touch or expose it:
+
+```bash
+scp .env.production root@<server>:/root/.env.production
+ssh root@<server> 'chmod 600 /root/.env.production'
+```
+
 The `prod.env` switch points every later command at production (base + overlay +
-`.env.production`):
+`/root/.env.production`):
 
 ```bash
 source scripts/prod.env          # sets COMPOSE_FILE / COMPOSE_ENV_FILES / ENV_FILE
@@ -304,8 +312,8 @@ note Seafile is useless without its MariaDB `seafile_db`, even though the blocks
 the box. The bulk blobs live on the **Storage Box** (`immich_data` = photo/video
 originals, `seafile_box` = Seafile's object store + config). **A live Storage Box mount
 is not a backup** — enable the box's scheduled **snapshots** so a deletion or ransomware
-event is recoverable. `.env` / `.env.production` hold the secrets — back them up
-securely and separately.
+event is recoverable. `.env` (local dev) and `/root/.env.production` (server, outside
+the deploy dir) hold the secrets — back them up securely and separately.
 
 **Automated backup (`scripts/backup.sh`):** writes *consistent* dumps of the
 attached-volume state to `backup/backups/` on the Storage Box — `pg_dump`
