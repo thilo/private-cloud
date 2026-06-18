@@ -59,7 +59,7 @@ fi
 tmpmnt="$(mktemp -d)"
 trap 'umount "$tmpmnt" 2>/dev/null || true; rmdir "$tmpmnt" 2>/dev/null || true' EXIT
 mount -t cifs "//${SB_HOST}/${SB_SHARE}" "$tmpmnt" \
-  -o "username=${SB_USER},password=${SB_PASSWORD},vers=${SB_SMB_VERS}"
+  -o "username=${SB_USER},password=${SB_PASSWORD},vers=${SB_SMB_VERS},seal"
 mkdir -p "$tmpmnt/immich" "$tmpmnt/seafile"
 echo "    Storage Box reachable; immich/ and seafile/ present."
 

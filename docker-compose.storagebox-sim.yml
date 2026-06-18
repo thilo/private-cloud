@@ -40,6 +40,8 @@ services:
     command:
       - "-p"                                              # set ownership on shares
       - "-n"                                              # advertise via nmbd
+      - "-g"
+      - "smb encrypt = required"                          # force SMB3 sealing, like the real box does for the `seal` mount option
       - "-u"
       - "${SB_USER};${SB_PASSWORD}"
       - "-s"

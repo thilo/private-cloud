@@ -58,7 +58,7 @@ cleanup() {
 trap cleanup EXIT
 log "mounting //${SB_HOST}/${SB_SHARE} ..."
 mount -t cifs "//${SB_HOST}/${SB_SHARE}" "$MNT" \
-  -o "username=${SB_USER},password=${SB_PASSWORD},vers=${SB_SMB_VERS},uid=0,gid=0,file_mode=0600,dir_mode=0700" \
+  -o "username=${SB_USER},password=${SB_PASSWORD},vers=${SB_SMB_VERS},uid=0,gid=0,file_mode=0600,dir_mode=0700,seal" \
   || fail "could not mount the Storage Box"
 DEST="$MNT/backups"
 [[ -d "$DEST" ]] || fail "no backups/ directory on the Storage Box"

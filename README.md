@@ -162,22 +162,30 @@ are carved back to local SSD (`seafile_logs`); Seafile's real metadata (librarie
 users, file tree) lives in **MariaDB**, which stays local. Blocks are immutable
 content-addressed objects. (Seafile's config, incl.
 `seahub_settings.py`, also sits on the box — it travels over SMB to your own Storage
-Box; enable SMB encryption if that matters to you.)
+Box.)
 
 `nobrl` in the mount options avoids CIFS byte-range-lock errors, and the CIFS volumes
-are owned via the mount's `uid=`/`gid=` (so `volume-init` leaves them alone).
+are owned via the mount's `uid=`/`gid=` (so `volume-init` leaves them alone). `seal`
+turns on **SMB3 transport encryption** so all host↔box traffic is encrypted on the
+wire (set on every mount: the two CIFS volumes plus the `prod-setup`/`backup`/`restore`
+host mounts). This requires `SB_SMB_VERS` ≥ `3.0` — sealing fails on SMB 2.1. Note it
+is **transport-only**: blobs are written to the box in plaintext, so snapshots hold
+plaintext and a restore needs no key. For at-rest encryption use a Seafile **encrypted
+library** (true client-side E2EE) or encrypt above the mount.
 
 ### Test it locally first
 
 `docker-compose.storagebox-sim.yml` runs a throwaway **Samba** container that stands
 in for the Storage Box, so a local `docker compose up` exercises the *exact* CIFS
-mount path production uses — only `SB_HOST` differs. It's pulled in automatically by
-the `COMPOSE_FILE` line that `scripts/init.sh` writes to `.env`. Confirm the mounts
-are real CIFS:
+mount path production uses — only `SB_HOST` differs. The sim's Samba is configured
+with `smb encrypt = required`, so it also proves the `seal` (SMB3 encryption) path
+works end to end, not just in production. It's pulled in automatically by the
+`COMPOSE_FILE` line that `scripts/init.sh` writes to `.env`. Confirm the mounts are
+real CIFS and sealed:
 
 ```bash
 docker exec pc-immich-server mount | grep ' /data '
-#  //172.28.0.250/backup/immich on /data type cifs (…,uid=1000,…,nobrl,…)
+#  //172.28.0.250/backup/immich on /data type cifs (…,uid=1000,…,seal,…,nobrl,…)
 docker exec pc-seafile mount | grep ' /shared/seafile '
 ```
 
