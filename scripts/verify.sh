@@ -110,11 +110,22 @@ fi
 # ------------------------------------------------------------------ Seafile --
 echo "[3/3] Seafile — sync a local file (Web API used by the desktop/iOS clients)"
 sf() { curl -sS -k --resolve "${SEAFILE_DOMAIN}:${HTTPS_PORT}:${R}" "$@"; }
-sf_tok=$(sf -X POST "${SF_BASE}/api2/auth-token/" \
-          -d "username=${SEAFILE_ADMIN_EMAIL}" -d "password=${SEAFILE_ADMIN_PASSWORD}" \
-          | jget token)
+# If the Seafile admin has 2FA enrolled (ENABLE_TWO_FACTOR_AUTH), the token API
+# needs a one-time code. Pass it for this run only: SEAFILE_OTP=123456 ./scripts/verify.sh
+# Left unset, the call behaves exactly as before (fine for accounts without 2FA).
+if [[ -n "${SEAFILE_OTP:-}" ]]; then
+  sf_tok=$(sf -H "X-SEAFILE-OTP: ${SEAFILE_OTP}" -X POST "${SF_BASE}/api2/auth-token/" \
+            -d "username=${SEAFILE_ADMIN_EMAIL}" -d "password=${SEAFILE_ADMIN_PASSWORD}" | jget token)
+else
+  sf_tok=$(sf -X POST "${SF_BASE}/api2/auth-token/" \
+            -d "username=${SEAFILE_ADMIN_EMAIL}" -d "password=${SEAFILE_ADMIN_PASSWORD}" | jget token)
+fi
 if [[ -z "$sf_tok" ]]; then
-  no "Seafile admin login failed (is pc-seafile healthy yet?)"
+  if [[ -z "${SEAFILE_OTP:-}" ]]; then
+    no "Seafile admin login failed — if 2FA is enabled for ${SEAFILE_ADMIN_EMAIL}, re-run with SEAFILE_OTP=<6-digit code> (else check pc-seafile is healthy)"
+  else
+    no "Seafile admin login failed even with SEAFILE_OTP (code expired/incorrect, or pc-seafile not healthy)"
+  fi
 else
   ok "logged in as ${SEAFILE_ADMIN_EMAIL}"
   sfa=(-H "Authorization: Token ${sf_tok}")
