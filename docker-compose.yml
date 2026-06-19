@@ -60,12 +60,19 @@ volumes:
   # require the nls_utf8 kernel module, which minimal cloud kernels (e.g. Ubuntu's
   # -virtual flavor) do not ship — that mount fails with a misleading
   # "can not access a needed shared library" error.
+  # nostrictsync (immich_data only): skip the server-side flush on fsync(). Photo
+  # ingest is many small write+fsync bursts where the round-trip to the box — not
+  # raw throughput — is the tax, so dropping the per-file flush is a documented
+  # ~2x win on this workload. The risk (bytes written-but-not-yet-flushed are lost
+  # on a host crash / network blip) is acceptable here: the phone is the source of
+  # truth and the scheduled Storage Box backup is the floor. Deliberately NOT on
+  # seafile_box, where a half-written commit may have no upstream copy.
   immich_data:       # Immich originals: library/ + upload/ (uid 1000)
     driver: local
     driver_opts:
       type: cifs
       device: "//${SB_HOST}/${SB_SHARE}/immich"
-      o: "username=${SB_USER},password=${SB_PASSWORD},uid=1000,gid=1000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal"
+      o: "username=${SB_USER},password=${SB_PASSWORD},uid=1000,gid=1000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,nostrictsync"
   seafile_box:       # Seafile data tree: object store + conf + seahub-data (uid 8000)
     driver: local
     driver_opts:
