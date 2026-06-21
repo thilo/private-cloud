@@ -21,18 +21,27 @@ Requirements: Docker + Docker Compose, `node` and `python3` on the host (for the
 verification scripts), outbound internet.
 
 ```bash
-./scripts/init.sh          # generate .env with strong random secrets (run once)
-docker compose up -d       # pull images and start everything
+./scripts/init.sh          # generate .env (runtime) + .env.setup (admin accounts), run once
+
+# FIRST start only — the setup overlay + setup env file seed the admin accounts:
+docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \
+  -f docker-compose.setup.yml --env-file .env --env-file .env.setup up -d
+
 ./scripts/bootstrap.sh     # create the Immich admin
 ./scripts/verify.sh        # run the three acceptance tests
+
+# Day-to-day afterwards is just:  docker compose up -d
 ```
+
+The initial admin passwords are **setup-only** secrets and live in a separate
+`.env.setup` (not loaded at runtime) — see [Secrets: setup vs runtime](#secrets-setup-vs-runtime).
 
 Local URLs (the `*.127.0.0.1.nip.io` names resolve to `127.0.0.1` automatically):
 
 | App | URL | Login |
 |-----|-----|-------|
-| Seafile | https://seafile.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env` |
-| Immich | https://immich.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env` |
+| Seafile | https://seafile.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
+| Immich | https://immich.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
 | Vaultwarden | https://vault.127.0.0.1.nip.io:8443 | register in the web vault |
 
 Your browser will warn about the certificate because Caddy uses its **internal
@@ -60,7 +69,7 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 ## Connecting the real clients
 
 - **Seafile (iOS / desktop):** App Store / desktop client → server URL = your
-  `https://seafile.…`, log in as `admin@example.com` (see `.env`). For E2EE,
+  `https://seafile.…`, log in as `admin@example.com` (see `.env.setup`). For E2EE,
   create an **encrypted library** (set a library password) — the password never
   leaves your device, so the server only ever stores ciphertext. The iOS app
   prompts for that password to unlock the library.
@@ -78,23 +87,29 @@ volumes onto an **attached block volume** (e.g. a Hetzner Volume) while logs/tem
 stay on the host root disk and the bulk blobs stay on the Storage Box. The base
 `docker-compose.yml` is unchanged between local and production.
 
-**1. Configure.** Generate `.env.production` with fresh secrets, then set your
-domains, the Let's Encrypt email, the Storage Box password, and `DATA_ROOT` (a
-directory on the attached volume):
+**1. Configure.** Generate `.env.production` (runtime secrets) **and**
+`.env.production.setup` (the initial admin accounts), then set your domains, the
+Let's Encrypt email, the Storage Box password, and `DATA_ROOT` (a directory on the
+attached volume):
 
 ```bash
 ENV_FILE=.env.production EXAMPLE=.env.production.example GEN_SB_PASSWORD=0 \
-  ./scripts/init.sh
+  ./scripts/init.sh             # writes .env.production + .env.production.setup
 $EDITOR .env.production          # set domains, CADDY_TLS, SB_PASSWORD, DATA_ROOT
+$EDITOR .env.production.setup    # set the admin email(s) to your real address
 ```
 
-Then copy it to the server **outside the deploy directory** so rsync updates never
-touch or expose it:
+Then copy **both** to the server **outside the deploy directory** so rsync updates
+never touch or expose them:
 
 ```bash
-scp .env.production root@<server>:/root/.env.production
-ssh root@<server> 'chmod 600 /root/.env.production'
+scp .env.production .env.production.setup root@<server>:/root/
+ssh root@<server> 'chmod 600 /root/.env.production /root/.env.production.setup'
 ```
+
+`.env.production.setup` is **setup-only** — Compose does not load it at runtime; it
+is read only during the first `up` and by `bootstrap.sh` / `verify.sh`. See
+[Secrets: setup vs runtime](#secrets-setup-vs-runtime).
 
 The `prod.env` switch points every later command at production (base + overlay +
 `/root/.env.production`):
@@ -120,13 +135,18 @@ subdirs, and creates/validates the Storage Box subfolders):
 sudo -E ./scripts/prod-setup.sh
 ```
 
-**5. Bring it up:**
+**5. Bring it up.** The **first** `up` adds the setup overlay + setup env file to
+seed the Seafile admin; every later `up` omits both:
 
 ```bash
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.production.yml \
+  -f docker-compose.setup.yml \
+  --env-file /root/.env.production --env-file /root/.env.production.setup up -d
 ./scripts/bootstrap.sh           # create the Immich admin
 ./scripts/tune-seafile.sh        # cut seahub workers to 2 (after fresh setup)
 ./scripts/verify.sh              # acceptance tests
+
+# Day-to-day afterwards (prod.env already sourced):  docker compose up -d
 ```
 
 For a CA-DNS challenge (wildcard certs / no inbound 80) build Caddy with your
@@ -303,6 +323,45 @@ the admin password→token API login that the clients and `verify.sh` use.
 To give a >4 GB host more cache, raise the `immich-db` `shared_buffers` /
 `effective_cache_size` and the per-service `mem_limit`s proportionally.
 
+## Secrets: setup vs runtime
+
+Secrets are split into two files by lifecycle, so the credentials Compose loads
+into the running stack on every `up` never include human-account passwords:
+
+| | **Runtime** secrets | **Setup-only** secrets |
+|---|---|---|
+| File (local / prod) | `.env` / `/root/.env.production` | `.env.setup` / `/root/.env.production.setup` |
+| Loaded by | Compose, on **every** `up` | only `init.sh`, `bootstrap.sh`, `verify.sh`, and the **first** `up` |
+| Contents | DB / Redis passwords, `SEAFILE_JWT_KEY`, `SB_PASSWORD`, `VAULTWARDEN_ADMIN_TOKEN` — machine creds the long-running containers read continuously | `IMMICH_ADMIN_*`, `SEAFILE_ADMIN_*` — used once to create the first admin accounts, then only to log in / run `verify.sh` |
+
+`scripts/init.sh` generates both (each `chmod 600`, both gitignored). The setup file
+is **not** referenced by the base `docker-compose.yml`, so a normal `docker compose
+up -d` never puts admin creds into a container's environment. Seafile's first-boot
+seeding vars (`INIT_SEAFILE_ADMIN_*`, `INIT_SEAFILE_MYSQL_ROOT_PASSWORD`) live in a
+small overlay, `docker-compose.setup.yml`, applied only on the first `up`; afterwards
+they are absent from `docker inspect pc-seafile`. (Immich's admin creds were never in
+a container env — only `bootstrap.sh` reads them via the setup file.)
+
+Once your accounts exist, the secret of record is the account itself: **store the
+admin passwords in Vaultwarden.** You can keep the setup file (so `verify.sh` runs
+unattended), or back it up separately and remove it from the box — runtime is
+unaffected either way. Keep both files in your offline backup; losing the runtime
+file means losing the DB/JWT/box credentials.
+
+> **Why not file-based (`/run/secrets`) for runtime secrets?** On a single-node,
+> single-user stack the gain is marginal and uneven: reading a container's env needs
+> root or Docker-socket access (which already grants `/run/secrets` too), the env file
+> is already `chmod 600` and outside the deploy dir, and several secrets can't be
+> file-mounted cleanly anyway (Redis takes its password as a CLI arg, `SB_PASSWORD`
+> lives in the CIFS volume options, the Seafile image is env-only). There are also no
+> build-time secrets — every service is a pulled image. So runtime secrets stay as
+> env vars; the worthwhile win was getting the *setup* secrets out of the runtime
+> container env, above.
+
+**Migrating an existing deployment:** create `/root/.env.production.setup` with the
+five `*_ADMIN_*` lines, remove them from `/root/.env.production`, then run a plain
+`docker compose up -d` — it recreates `seafile-server` with a clean, admin-free env.
+
 ## Operations
 
 ```bash
@@ -320,8 +379,10 @@ note Seafile is useless without its MariaDB `seafile_db`, even though the blocks
 the box. The bulk blobs live on the **Storage Box** (`immich_data` = photo/video
 originals, `seafile_box` = Seafile's object store + config). **A live Storage Box mount
 is not a backup** — enable the box's scheduled **snapshots** so a deletion or ransomware
-event is recoverable. `.env` (local dev) and `/root/.env.production` (server, outside
-the deploy dir) hold the secrets — back them up securely and separately.
+event is recoverable. The env files hold the secrets — `.env` + `.env.setup` (local
+dev) and `/root/.env.production` + `/root/.env.production.setup` (server, outside the
+deploy dir); back them up securely and separately. See
+[Secrets: setup vs runtime](#secrets-setup-vs-runtime).
 
 **Automated backup (`scripts/backup.sh`):** writes *consistent* dumps of the
 attached-volume state to `backup/backups/` on the Storage Box — `pg_dump`

@@ -1,0 +1,30 @@
+# Setup overlay — apply ONLY for the first `up` (initial provisioning).
+#
+# Seafile reads these INIT_* vars on first boot to seed the admin account and to
+# create its databases/users (using the MySQL root password). After that they are
+# ignored — so they are kept OUT of the base file's long-running `environment:`,
+# where they would otherwise sit in `docker inspect pc-seafile` forever. They are
+# supplied here, transiently, and resolved from the SETUP env file (.env.setup /
+# .env.production.setup) which Compose does NOT load at runtime.
+#
+# First-time provisioning (local):
+#   docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \
+#     -f docker-compose.setup.yml --env-file .env --env-file .env.setup up -d
+# First-time provisioning (production):
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml \
+#     -f docker-compose.setup.yml \
+#     --env-file /root/.env.production --env-file /root/.env.production.setup up -d
+#
+# Day-to-day `up` omits this overlay (and the setup env file); the next plain
+# `docker compose up -d` recreates seafile-server with a clean, admin-free env.
+
+name: private-cloud
+
+services:
+  seafile-server:
+    environment:
+      # First admin account, created on Seafile's first start (used by the apps).
+      INIT_SEAFILE_ADMIN_EMAIL: ${SEAFILE_ADMIN_EMAIL}
+      INIT_SEAFILE_ADMIN_PASSWORD: ${SEAFILE_ADMIN_PASSWORD}
+      # Root password used once to create the seafile DBs/users on first boot.
+      INIT_SEAFILE_MYSQL_ROOT_PASSWORD: ${SEAFILE_DB_ROOT_PASSWORD}

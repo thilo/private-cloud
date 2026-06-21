@@ -446,13 +446,14 @@ services:
       SEAFILE_MYSQL_DB_PORT: "3306"
       SEAFILE_MYSQL_DB_USER: seafile
       SEAFILE_MYSQL_DB_PASSWORD: ${SEAFILE_DB_PASSWORD}
-      INIT_SEAFILE_MYSQL_ROOT_PASSWORD: ${SEAFILE_DB_ROOT_PASSWORD}
       SEAFILE_MYSQL_DB_CCNET_DB_NAME: ccnet_db
       SEAFILE_MYSQL_DB_SEAFILE_DB_NAME: seafile_db
       SEAFILE_MYSQL_DB_SEAHUB_DB_NAME: seahub_db
       TIME_ZONE: ${TZ}
-      INIT_SEAFILE_ADMIN_EMAIL: ${SEAFILE_ADMIN_EMAIL}
-      INIT_SEAFILE_ADMIN_PASSWORD: ${SEAFILE_ADMIN_PASSWORD}
+      # The first-boot-only INIT_SEAFILE_ADMIN_* and INIT_SEAFILE_MYSQL_ROOT_PASSWORD
+      # are intentionally NOT here: they would otherwise persist in the long-running
+      # container env (`docker inspect pc-seafile`). They are supplied transiently by
+      # docker-compose.setup.yml during initial provisioning only. See that file.
       # Hostname includes the port so Seahub emits correct absolute URLs and
       # CSRF origins on the non-standard local HTTPS port (harmless :443 in prod).
       SEAFILE_SERVER_HOSTNAME: "${SEAFILE_DOMAIN}:${HTTPS_PORT}"

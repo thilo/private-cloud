@@ -5,7 +5,16 @@
 #   3. Seafile    — sync a local file (same Web API the desktop/iOS clients use)
 set -uo pipefail
 cd "$(dirname "$0")/.."
-set -a; . "${ENV_FILE:-./.env}"; set +a
+# Runtime config + the setup-only admin secrets live in two files; the login
+# tests need IMMICH_ADMIN_* / SEAFILE_ADMIN_* from the setup file (see README
+# "Secrets: setup vs runtime").
+RUNTIME_ENV="${ENV_FILE:-./.env}"
+SETUP_ENV="${SETUP_ENV_FILE:-${RUNTIME_ENV}.setup}"
+set -a
+. "$RUNTIME_ENV"
+[[ -f "$SETUP_ENV" ]] && . "$SETUP_ENV"
+set +a
+[[ -f "$SETUP_ENV" ]] || echo "  ! setup file $SETUP_ENV not found — admin logins will fail (run ./scripts/init.sh or set SETUP_ENV_FILE)." >&2
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0

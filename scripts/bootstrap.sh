@@ -5,7 +5,20 @@
 # and its encrypted libraries are client-side, so it needs no bootstrap step.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . "${ENV_FILE:-./.env}"; set +a
+# Runtime config + the setup-only secrets (initial admin accounts) live in two
+# files; this script needs IMMICH_ADMIN_* from the setup file (see README
+# "Secrets: setup vs runtime").
+RUNTIME_ENV="${ENV_FILE:-./.env}"
+SETUP_ENV="${SETUP_ENV_FILE:-${RUNTIME_ENV}.setup}"
+set -a
+. "$RUNTIME_ENV"
+[[ -f "$SETUP_ENV" ]] && . "$SETUP_ENV"
+set +a
+if [[ -z "${IMMICH_ADMIN_PASSWORD:-}" || "${IMMICH_ADMIN_PASSWORD}" == "CHANGEME" ]]; then
+  echo "IMMICH_ADMIN_PASSWORD is not set — it lives in the setup file ($SETUP_ENV)." >&2
+  echo "Run ./scripts/init.sh, or pass SETUP_ENV_FILE=/path/to/your.setup." >&2
+  exit 1
+fi
 
 curlk() {
   curl -sS -k --resolve "${IMMICH_DOMAIN}:${HTTPS_PORT}:127.0.0.1" "$@"
