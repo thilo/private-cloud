@@ -258,6 +258,18 @@ rootfs is relaxed. Seafile additionally drops its data daemons (`seaf-server`,
 `seahub`, `fileserver`) to a non-root uid; only the bundled `my_init`/nginx master
 remain root, which the stock image requires.
 
+At the ingress, Caddy applies a shared `(security_headers)` snippet to **all
+three** sites: `Strict-Transport-Security` (HSTS, 180 days, `includeSubDomains`;
+no `preload` — that commitment is opt-in), `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin` (so the access tokens in Seafile/Immich share-link
+URLs never leak to third parties via the `Referer` header, while same-origin
+requests keep the full `Referer` that Seahub's Django CSRF check needs), and the
+`Server` header stripped. Caddy is the edge proxy with no
+`trusted_proxies` configured, so it **ignores any client-supplied
+`X-Forwarded-For`** and forwards only the real connecting IP — a forged header
+cannot poison the per-client login limiters that Immich
+(`IMMICH_TRUSTED_PROXIES`) and Vaultwarden (`IP_HEADER=X-Forwarded-For`) build on.
+
 On top of the container controls, Immich runs with these application-level
 settings (all on `immich-server`):
 

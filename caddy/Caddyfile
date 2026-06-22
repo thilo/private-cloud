@@ -1,37 +1,51 @@
 # Caddy reverse proxy — automatic HTTPS for all three apps.
 #
-# One variable decides local vs production:
 #   CADDY_TLS=internal         -> Caddy's built-in CA (self-signed), local tests
 #   CADDY_TLS=you@example.com  -> automatic Let's Encrypt for real domains
 #
 # Domains come from the environment (SEAFILE_DOMAIN / IMMICH_DOMAIN /
 # VAULTWARDEN_DOMAIN), so this file never changes between deployments.
-
+#
+# No trusted_proxies: as the edge, Caddy ignores any client-sent X-Forwarded-For
+# and forwards the real peer, so a forged XFF can't poison Immich's / Vaultwarden's
+# per-IP login limiters — no header_up override needed.
 {
-	# Keep the admin API on loopback inside the container (used by healthcheck).
+	# Admin API on loopback only (the healthcheck hits it).
 	admin localhost:2019
+}
+
+# Shared response headers. No prefix = replace, so upstreams can't leave duplicates.
+(security_headers) {
+	header {
+		# No preload — it's a hard-to-undo browser commitment; opt in (and raise
+		# max-age to >=1y) only if submitting to hstspreload.org.
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		# same-origin (stricter than the browser default): drops the Referer
+		# cross-site so Seafile/Immich share-link tokens in the URL never leak,
+		# but keeps it same-origin for Seahub's Django CSRF check.
+		Referrer-Policy "same-origin"
+		-Server
+	}
 }
 
 # ------------------------------------------------------------------- Immich --
 {$IMMICH_DOMAIN} {
 	tls {$CADDY_TLS}
+	import security_headers
 
-	# Immich handles large uploads; don't cap the request body here.
+	# Large uploads — don't cap the request body.
 	reverse_proxy immich-server:2283
 }
 
 # ------------------------------------------------------------------ Seafile --
 {$SEAFILE_DOMAIN} {
 	tls {$CADDY_TLS}
+	import security_headers
 
-	header {
-		Strict-Transport-Security "max-age=15552000; includeSubDomains"
-		-Server
-	}
-
-	# Seafile handles large uploads; don't cap the request body here.
-	# X-Forwarded-Proto lets Seahub (Django) emit https URLs and pass CSRF checks.
+	# Large uploads — don't cap the request body.
 	reverse_proxy seafile-server:80 {
+		# Lets Seahub (Django) emit https URLs and pass CSRF checks.
 		header_up X-Forwarded-Proto https
 	}
 }
@@ -39,11 +53,7 @@
 # -------------------------------------------------------------- Vaultwarden --
 {$VAULTWARDEN_DOMAIN} {
 	tls {$CADDY_TLS}
-
-	header {
-		Strict-Transport-Security "max-age=15552000; includeSubDomains"
-		-Server
-	}
+	import security_headers
 
 	reverse_proxy vaultwarden:8080
 }
