@@ -40,10 +40,10 @@ volumes:
   # Local SSD — latency-sensitive data that must NOT live on the (network) Storage
   # Box: the databases above, plus Seafile's conf/metadata and Immich's hot,
   # constantly-read derivatives.
-  seafile_data:      # Seafile /shared parent (the seafile_box mount nests under it)
-  seafile_logs:      # Seafile logs — kept local (per-request access logs are chatty)
-  immich_thumbs:     # Immich thumbnails (read on every grid/scroll)
-  immich_encoded:    # Immich transcoded video
+  seafile_data: # Seafile /shared parent (the seafile_box mount nests under it)
+  seafile_logs: # Seafile logs — kept local (per-request access logs are chatty)
+  immich_thumbs: # Immich thumbnails (read on every grid/scroll)
+  immich_encoded: # Immich transcoded video
 
   # Storage Box — cheap bulk blobs over CIFS/SMB. ${SB_*} come from .env.
   #   LOCAL : docker-compose.storagebox-sim.yml runs a Samba server at ${SB_HOST}.
@@ -67,13 +67,13 @@ volumes:
   # on a host crash / network blip) is acceptable here: the phone is the source of
   # truth and the scheduled Storage Box backup is the floor. Deliberately NOT on
   # seafile_box, where a half-written commit may have no upstream copy.
-  immich_data:       # Immich originals: library/ + upload/ (uid 1000)
+  immich_data: # Immich originals: library/ + upload/ (uid 1000)
     driver: local
     driver_opts:
       type: cifs
       device: "//${SB_HOST}/${SB_SHARE}/immich"
       o: "username=${SB_USER},password=${SB_PASSWORD},uid=1000,gid=1000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,nostrictsync"
-  seafile_box:       # Seafile data tree: object store + conf + seahub-data (uid 8000)
+  seafile_box: # Seafile data tree: object store + conf + seahub-data (uid 8000)
     driver: local
     driver_opts:
       type: cifs
@@ -81,7 +81,6 @@ volumes:
       o: "username=${SB_USER},password=${SB_PASSWORD},uid=8000,gid=8000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal"
 
 services:
-
   # --------------------------------------------------------------- ingress --
   caddy:
     image: ${CADDY_IMAGE}
@@ -132,11 +131,17 @@ services:
   volume-init:
     image: alpine:3.20
     container_name: pc-volume-init
-    command: ["sh", "-c", "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded && chown -R 8000:8000 /seafile /seafile-logs"]
+    command:
+      [
+        "sh",
+        "-c",
+        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 8000:8000 /seafile /seafile-logs",
+      ]
     volumes:
       - vaultwarden_data:/vw
       - immich_thumbs:/immich-thumbs
       - immich_encoded:/immich-encoded
+      - immich_modelcache:/immich-modelcache
       - seafile_data:/seafile
       - seafile_logs:/seafile-logs
     restart: "no"
@@ -180,7 +185,11 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/alive >/dev/null 2>&1 || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/alive >/dev/null 2>&1 || exit 1",
+        ]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -241,7 +250,8 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${IMMICH_DB_USER} -d ${IMMICH_DB_NAME}"]
+      test:
+        ["CMD-SHELL", "pg_isready -U ${IMMICH_DB_USER} -d ${IMMICH_DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -275,7 +285,11 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "valkey-cli -a \"$$REDISCLI_AUTH\" --no-auth-warning ping | grep -q PONG"]
+      test:
+        [
+          "CMD-SHELL",
+          'valkey-cli -a "$$REDISCLI_AUTH" --no-auth-warning ping | grep -q PONG',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -339,8 +353,17 @@ services:
     restart: *restart
     mem_limit: 1024m
     cpus: "0.75"
+    user: "1000:1000"
     environment:
       TZ: ${TZ}
+      HOME: /cache
+      # gunicorn (25.x) opens a control socket in its working dir (/usr/src) for the
+      # `gunicornc` admin tool. That dir is root-owned and read-only here, so the
+      # default path can't be created and boot would log a benign but noisy ERROR
+      # ("Control server: ... Read-only file system"). Relocate it onto the /tmp
+      # tmpfs so it works regardless — including if MACHINE_LEARNING_WORKERS is ever
+      # raised, where the master uses this socket to manage the workers.
+      GUNICORN_CMD_ARGS: "--control-socket /tmp/gunicorn.ctl"
       # Keep the ML peak bounded for the 4 GB box: unload idle models after 5 min,
       # a single worker, and serialized inference so concurrent jobs don't stack
       # multiple model copies in RAM. Jobs throttle/retry rather than OOM the host.
@@ -351,9 +374,12 @@ services:
       - immich_modelcache:/cache
     networks:
       - proxy
-    # read_only not applied — the ML runtime's control server writes a socket on
-    # its rootfs that a read-only fs rejects. Still hardened: cap_drop ALL +
-    # no-new-privileges, no published ports. See README "Hardening".
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -431,7 +457,11 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDISCLI_AUTH\" --no-auth-warning ping | grep -q PONG"]
+      test:
+        [
+          "CMD-SHELL",
+          'redis-cli -a "$$REDISCLI_AUTH" --no-auth-warning ping | grep -q PONG',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -496,11 +526,16 @@ services:
     # its own nginx/my_init across the rootfs. Still hardened: cap_drop ALL +
     # no-new-privileges + non-root daemons (NON_ROOT) + internal-only DB/cache.
     cap_drop: [ALL]
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, NET_BIND_SERVICE, KILL]
+    cap_add:
+      [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, NET_BIND_SERVICE, KILL]
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 10

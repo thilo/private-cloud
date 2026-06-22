@@ -237,9 +237,9 @@ mechanism that satisfies "remove dev tools / package managers": even though the
 stock images still contain `apt`/`apk`, an attacker cannot install or persist
 anything on a read-only, capability-stripped, no-new-privileges container.
 
-Per-image status (verified on the live stack — **7 of 9 services run a
-read-only root filesystem**; the two exceptions are stock-image limitations and
-keep every other control):
+Per-image status (verified on the live stack — **8 of 9 services run a
+read-only root filesystem**; the one exception (`seafile-server`) is a stock-image
+limitation and keeps every other control):
 
 | Service | Non-root | Read-only rootfs | Notes |
 |---------|----------|------------------|-------|
@@ -250,13 +250,13 @@ keep every other control):
 | immich-redis / seafile-redis | ✅ **uid 999** | ✅ yes | ephemeral, password-protected |
 | immich-server | ✅ **uid 1000 (`node`)** | ✅ yes | official image adapted to non-root; upload volume chowned |
 | seafile-server | ⚠️ **daemons uid 8000** (`NON_ROOT`); init/nginx stay root | ❌ no | image regenerates config + runs its own nginx across the rootfs; `volume-init` chowns `/shared` to 8000 |
-| immich-ml | root | ❌ no | ML control-server writes a socket on its rootfs |
+| immich-ml | ✅ **uid 1000** | ✅ yes | model cache chowned; `HOME` and gunicorn's control socket moved onto writable mounts (`/cache`, `/tmp`), so nothing needs the rootfs writable |
 
-The two ❌ services still run with `cap_drop: ALL`, `no-new-privileges`, pinned
-images, and no published ports — only their read-only rootfs is relaxed. Seafile
-additionally drops its data daemons (`seaf-server`, `seahub`, `fileserver`) to a
-non-root uid; only the bundled `my_init`/nginx master remain root, which the
-stock image requires.
+The one remaining ❌ service (`seafile-server`) still runs with `cap_drop: ALL`,
+`no-new-privileges`, pinned images, and no published ports — only its read-only
+rootfs is relaxed. Seafile additionally drops its data daemons (`seaf-server`,
+`seahub`, `fileserver`) to a non-root uid; only the bundled `my_init`/nginx master
+remain root, which the stock image requires.
 
 On top of the container controls, Immich runs with these application-level
 settings (all on `immich-server`):
