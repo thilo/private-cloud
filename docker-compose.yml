@@ -535,9 +535,9 @@ services:
       JWT_PRIVATE_KEY: ${SEAFILE_JWT_KEY}
       SEAFILE_LOG_TO_STDOUT: "false"
       ENABLE_GO_FILESERVER: "true"
+      ENABLE_NOTIFICATION_SERVER: "true"
       # Optional extras kept off to stay lean (file sync + E2EE only).
       ENABLE_SEADOC: "false"
-      ENABLE_NOTIFICATION_SERVER: "false"
       ENABLE_SEAFILE_AI: "false"
       ENABLE_FACE_RECOGNITION: "false"
       CACHE_PROVIDER: redis
@@ -581,3 +581,53 @@ services:
       timeout: 10s
       retries: 10
       start_period: 180s
+
+  # ----------------------------------------------------- notification server --
+  # The service key must stay `notification-server`: seafile-server's
+  # INNER_NOTIFICATION_SERVER_URL defaults to http://notification-server:8083.
+  notification-server:
+    image: ${NOTIFICATION_SERVER_IMAGE}
+    container_name: pc-notification
+    restart: *restart
+    mem_limit: 64m
+    pids_limit: 128
+    environment:
+      SEAFILE_MYSQL_DB_HOST: seafile-db
+      SEAFILE_MYSQL_DB_PORT: "3306"
+      SEAFILE_MYSQL_DB_USER: seafile
+      SEAFILE_MYSQL_DB_PASSWORD: ${SEAFILE_DB_PASSWORD}
+      SEAFILE_MYSQL_DB_CCNET_DB_NAME: ccnet_db
+      SEAFILE_MYSQL_DB_SEAFILE_DB_NAME: seafile_db
+      JWT_PRIVATE_KEY: ${SEAFILE_JWT_KEY}
+      TIME_ZONE: ${TZ}
+      SEAFILE_LOG_TO_STDOUT: "false"
+      NOTIFICATION_SERVER_LOG_LEVEL: info
+    volumes:
+      - seafile_logs:/shared/seafile/logs
+    networks:
+      - proxy
+      - seafile-internal
+    depends_on:
+      seafile-db:
+        condition: service_healthy
+      seafile-server:
+        condition: service_healthy
+    # Runs as uid 8000 (owns the log dir) with a read-only rootfs and no added caps.
+    user: "8000:8000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=16m
+    # No HTTP client in the image; check the listen socket via procfs (0x1F93=8083, 0A=LISTEN).
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "grep -qiE ':1F93 0+:0+ 0A' /proc/net/tcp /proc/net/tcp6 2>/dev/null || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s

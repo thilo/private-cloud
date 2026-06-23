@@ -3,6 +3,7 @@
 #   1. Vaultwarden — store & retrieve a password (Bitwarden client crypto) + 2FA
 #   2. Immich     — sync a photo (same REST API the iOS app uses)
 #   3. Seafile    — sync a local file (same Web API the desktop/iOS clients use)
+#                   + notification server reachable (real-time push) via /notification
 set -uo pipefail
 cd "$(dirname "$0")/.."
 # Runtime config + the setup-only admin secrets live in two files; the login
@@ -157,6 +158,16 @@ else
     sf "${sfa[@]}" -X DELETE "${SF_BASE}/api2/repos/${repo}/" >/dev/null 2>&1 || true
   fi
   info "client-side encrypted libraries (the reliable iOS E2EE) are created in the app"
+fi
+
+# Notification server (real-time push) — unauthenticated health endpoint that Caddy
+# proxies at /notification/ping. A pong proves Caddy strips the /notification prefix
+# and reaches the sidecar on :8083 (the same websocket path the clients use).
+np=$(sf "${SF_BASE}/notification/ping" 2>/dev/null)
+if [[ "$np" == *pong* ]]; then
+  ok "notification server reachable through Caddy (/notification/ping → pong)"
+else
+  no "notification server ping failed through Caddy: ${np:-<empty>}"
 fi
 
 # ----------------------------------------------------------------- summary --

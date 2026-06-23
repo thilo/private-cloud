@@ -9,6 +9,7 @@ compose`, hardened containers, runnable locally or on a real server.
 ```
                          ┌───────── Caddy (auto-HTTPS, only ingress) ─────────┐
   https://seafile.…    → │  seafile-server ─ seafile-db (mariadb) / -redis     │
+       …/notification  → │    └ notification-server (real-time push, ws)       │
   https://immich.…     → │  immich-server ─ immich-db / immich-redis / -ml     │
   https://vault.…      → │  vaultwarden (sqlite)                               │
                          └────────────────────────────────────────────────────┘
@@ -245,7 +246,7 @@ import, so `noexec` there kills the worker boot (the gunicorn master stays up bu
 in the read-only guarantee: `/tmp` was the one writable path where a dropped binary
 could still be executed.
 
-Per-image status (verified on the live stack — **8 of 9 services run a
+Per-image status (verified on the live stack — **9 of 10 services run a
 read-only root filesystem**; the one exception (`seafile-server`) is a stock-image
 limitation and keeps every other control):
 
@@ -258,6 +259,7 @@ limitation and keeps every other control):
 | immich-redis / seafile-redis | ✅ **uid 999** | ✅ yes | ephemeral, password-protected |
 | immich-server | ✅ **uid 1000 (`node`)** | ✅ yes | official image adapted to non-root; upload volume chowned |
 | seafile-server | ⚠️ **daemons uid 8000** (`NON_ROOT`); init/nginx stay root | ❌ no | image regenerates config + runs its own nginx across the rootfs; `volume-init` chowns `/shared` to 8000 |
+| notification-server | ✅ **uid 8000** | ✅ yes | minimal Go websocket sidecar; its CMD is the binary directly (no `my_init`), so it runs non-root with **zero** caps — reads config from env, writes only to the (8000-owned) log volume + `/tmp` |
 | immich-ml | ✅ **uid 1000** | ✅ yes | model cache chowned; `HOME` and gunicorn's control socket moved onto writable mounts (`/cache`, `/tmp`), so nothing needs the rootfs writable |
 
 The one remaining ❌ service (`seafile-server`) still runs with `cap_drop: ALL`,
@@ -319,6 +321,7 @@ while the ML model is still idle.
 | seafile-server | 640M | seahub gunicorn workers 5→2 (`scripts/tune-seafile.sh`) |
 | immich-db | 768M | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM. 768M (not 512M) clears the one-time first-boot reverse-geocoding import, which peaks ~680M |
 | seafile-db | 320M | MariaDB `innodb_buffer_pool=96M`, `performance_schema=OFF` |
+| notification-server | 64M | lightweight Go websocket sidecar for real-time push; idles at ~3M, so the ceiling is pure headroom |
 | caddy / vaultwarden / immich-redis / seafile-redis | 96M each | seafile-redis is a pure cache (`maxmemory 48M` + LRU); immich-redis is the BullMQ job broker, so it is **not** evicted |
 
 > **immich-db note:** the memory flags are layered on top of the image's default

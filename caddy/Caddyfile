@@ -46,10 +46,17 @@
 	tls {$CADDY_TLS}
 	import security_headers
 
-	# Large uploads — don't cap the request body.
-	reverse_proxy seafile-server:80 {
-		# Lets Seahub (Django) emit https URLs and pass CSRF checks.
-		header_up X-Forwarded-Proto https
+	# Real-time notification websocket; handle_path strips the /notification prefix.
+	handle_path /notification* {
+		reverse_proxy notification-server:8083
+	}
+
+	handle {
+		# Large uploads — don't cap the request body.
+		reverse_proxy seafile-server:80 {
+			# Lets Seahub (Django) emit https URLs and pass CSRF checks.
+			header_up X-Forwarded-Proto https
+		}
 	}
 }
 
