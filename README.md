@@ -261,10 +261,11 @@ limitation and keeps every other control):
 | immich-ml | ✅ **uid 1000** | ✅ yes | model cache chowned; `HOME` and gunicorn's control socket moved onto writable mounts (`/cache`, `/tmp`), so nothing needs the rootfs writable |
 
 The one remaining ❌ service (`seafile-server`) still runs with `cap_drop: ALL`,
-`no-new-privileges`, pinned images, and no published ports — only its read-only
-rootfs is relaxed. Seafile additionally drops its data daemons (`seaf-server`,
-`seahub`, `fileserver`) to a non-root uid; only the bundled `my_init`/nginx master
-remain root, which the stock image requires.
+`no-new-privileges`, pinned images, a `pids_limit`, and no published ports — only
+its read-only rootfs is relaxed. Seafile additionally drops its data daemons
+(`seaf-server`, `seahub`, `fileserver`) to a non-root uid; only the bundled
+`my_init`/nginx master remain root, which the stock image requires. The CIFS
+object-store mounts (`seafile_box`, `immich_data`) carry `noexec,nosuid,nodev`.
 
 At the ingress, Caddy applies a shared `(security_headers)` snippet to **all
 three** sites: `Strict-Transport-Security` (HSTS, 180 days, `includeSubDomains`;

@@ -54,6 +54,9 @@ volumes:
   # seal turns on SMB3 transport encryption, so blobs travel host<->box as
   # ciphertext on the wire (requires vers>=3.0; it does NOT encrypt data at rest
   # on the box — snapshots still hold plaintext. See README "Storage layout").
+  # noexec,nosuid,nodev: both shares hold only blobs, config and avatars, never
+  # executables. Like any driver_opts change, applying these needs a `docker volume
+  # rm` + recreate.
   # iocharset is intentionally NOT set: modern CIFS already maps filenames as
   # UTF-8 by default (via the built-in UTF-16 conversion in nls_ucs2_utils), so
   # Unicode names round-trip correctly. An explicit iocharset=utf8 would instead
@@ -72,13 +75,13 @@ volumes:
     driver_opts:
       type: cifs
       device: "//${SB_HOST}/${SB_SHARE}/immich"
-      o: "username=${SB_USER},password=${SB_PASSWORD},uid=1000,gid=1000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,nostrictsync"
+      o: "username=${SB_USER},password=${SB_PASSWORD},uid=1000,gid=1000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,nostrictsync,noexec,nosuid,nodev"
   seafile_box: # Seafile data tree: object store + conf + seahub-data (uid 8000)
     driver: local
     driver_opts:
       type: cifs
       device: "//${SB_HOST}/${SB_SHARE}/seafile"
-      o: "username=${SB_USER},password=${SB_PASSWORD},uid=8000,gid=8000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal"
+      o: "username=${SB_USER},password=${SB_PASSWORD},uid=8000,gid=8000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,noexec,nosuid,nodev"
 
 services:
   # --------------------------------------------------------------- ingress --
@@ -506,6 +509,9 @@ services:
     container_name: pc-seafile
     restart: *restart
     mem_limit: 640m
+    # Fork-bomb cap. Steady state is ~two dozen processes (my_init, nginx, seaf-server,
+    # 2 seahub gunicorn workers, go-fileserver).
+    pids_limit: 200
     environment:
       SEAFILE_MYSQL_DB_HOST: seafile-db
       SEAFILE_MYSQL_DB_PORT: "3306"
