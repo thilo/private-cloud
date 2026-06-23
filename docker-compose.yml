@@ -87,6 +87,16 @@ services:
     container_name: pc-caddy
     restart: *restart
     mem_limit: 96m
+    # Fork-bomb / runaway-spawn cap; Caddy is a single Go process.
+    pids_limit: 64
+    # Non-root: Caddy is the edge (the only container with published ports), so it
+    # runs unprivileged instead of root — shrinking container-escape surface and
+    # making volume writes non-root-owned. uid 1001 is deliberately distinct from the
+    # uid-1000 apps (vaultwarden/immich) so a Caddy compromise shares ownership with
+    # none of their volumes. It keeps only NET_BIND_SERVICE (see cap_add) to bind
+    # 80/443. volume-init chowns caddy_data/caddy_config to 1001 (the cert store +
+    # internal-CA key live in /data).
+    user: "1001:1001"
     ports:
       - "${HTTP_PORT}:80"
       - "${HTTPS_PORT}:443"
@@ -102,9 +112,14 @@ services:
     networks:
       - proxy
     read_only: true
+    # noexec/nosuid/nodev: /tmp is the one writable path on the read-only rootfs,
+    # so deny running a dropped binary there. size caps it.
     tmpfs:
-      - /tmp
+      - /tmp:noexec,nosuid,nodev,size=16m
     cap_drop: [ALL]
+    # NET_BIND_SERVICE: the only cap, needed to bind 80/443 as non-root. The official
+    # image's caddy binary carries this as a *file* capability, so it must stay in the
+    # bounding set — dropping it makes the exec itself fail (EPERM), not just the bind.
     cap_add: [NET_BIND_SERVICE]
     security_opt:
       - no-new-privileges:true
@@ -115,6 +130,8 @@ services:
       retries: 5
       start_period: 10s
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       immich-server:
         condition: service_started
       vaultwarden:
@@ -124,10 +141,11 @@ services:
 
   # ------------------------------------------------------------ vaultwarden --
   # One-shot chowner so the non-root services own their LOCAL data volumes before
-  # they start: vaultwarden + immich run as uid 1000, seafile's daemons as uid 8000
-  # (Seafile's NON_ROOT mode refuses to start unless /shared is writable). The CIFS
-  # Storage Box volume (immich_data) is excluded — its ownership comes from the
-  # mount's uid=, and CIFS can't be chown'd anyway.
+  # they start: vaultwarden + immich run as uid 1000, caddy as uid 1001 (a distinct
+  # uid so a Caddy compromise can't touch the other services' volumes), seafile's
+  # daemons as uid 8000 (Seafile's NON_ROOT mode refuses to start unless /shared is
+  # writable). The CIFS Storage Box volume (immich_data) is excluded — its ownership
+  # comes from the mount's uid=, and CIFS can't be chown'd anyway.
   volume-init:
     image: alpine:3.20
     container_name: pc-volume-init
@@ -135,13 +153,15 @@ services:
       [
         "sh",
         "-c",
-        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 8000:8000 /seafile /seafile-logs",
+        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data /caddy-config && chown -R 8000:8000 /seafile /seafile-logs",
       ]
     volumes:
       - vaultwarden_data:/vw
       - immich_thumbs:/immich-thumbs
       - immich_encoded:/immich-encoded
       - immich_modelcache:/immich-modelcache
+      - caddy_data:/caddy-data
+      - caddy_config:/caddy-config
       - seafile_data:/seafile
       - seafile_logs:/seafile-logs
     restart: "no"
@@ -179,8 +199,10 @@ services:
       volume-init:
         condition: service_completed_successfully
     read_only: true
+    # noexec/nosuid/nodev: the only writable paths on a read-only rootfs are scratch
+    # — never a place to run a dropped binary, hold a setuid bit, or mknod a device.
     tmpfs:
-      - /tmp
+      - /tmp:noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -240,11 +262,13 @@ services:
     networks:
       - immich-internal
     read_only: true
+    # noexec/nosuid/nodev: scratch, socket, and regenerated-config dirs — none run
+    # code, hold setuid bits, or need device nodes.
     tmpfs:
-      - /tmp
-      - /run/postgresql
+      - /tmp:noexec,nosuid,nodev
+      - /run/postgresql:noexec,nosuid,nodev
       # The immich postgres image writes a tuned config here on every start.
-      - /etc/postgresql
+      - /etc/postgresql:noexec,nosuid,nodev
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt:
@@ -278,9 +302,10 @@ services:
     networks:
       - immich-internal
     read_only: true
+    # noexec/nosuid/nodev: scratch + ephemeral data dir, neither runs code.
     tmpfs:
-      - /tmp
-      - /data
+      - /tmp:noexec,nosuid,nodev
+      - /data:noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -340,8 +365,10 @@ services:
       immich-redis:
         condition: service_healthy
     read_only: true
+    # noexec/nosuid/nodev: /tmp is scratch only (uploads stream to /data); native
+    # modules load from node_modules on the rootfs, never from here.
     tmpfs:
-      - /tmp
+      - /tmp:noexec,nosuid,nodev
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt:
@@ -378,8 +405,13 @@ services:
       volume-init:
         condition: service_completed_successfully
     read_only: true
+    # nosuid/nodev only — NOT noexec: the ML worker's native deps (onnxruntime et al.)
+    # mmap executable pages from a file under /tmp at import, so noexec kills worker
+    # boot (gunicorn master stays up but /ping never answers -> unhealthy). Verified
+    # on the live stack. /tmp also holds the gunicorn control socket; model/JIT caches
+    # live under HOME=/cache.
     tmpfs:
-      - /tmp
+      - /tmp:nosuid,nodev
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -412,9 +444,11 @@ services:
     networks:
       - seafile-internal
     read_only: true
+    # noexec/nosuid/nodev: scratch (temp tables) + the mysqld socket dir; no code runs
+    # from either.
     tmpfs:
-      - /tmp
-      - /run/mysqld
+      - /tmp:noexec,nosuid,nodev
+      - /run/mysqld:noexec,nosuid,nodev
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt:
@@ -450,9 +484,10 @@ services:
     networks:
       - seafile-internal
     read_only: true
+    # noexec/nosuid/nodev: scratch + ephemeral data dir, neither runs code.
     tmpfs:
-      - /tmp
-      - /data
+      - /tmp:noexec,nosuid,nodev
+      - /data:noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true

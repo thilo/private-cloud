@@ -237,13 +237,21 @@ mechanism that satisfies "remove dev tools / package managers": even though the
 stock images still contain `apt`/`apk`, an attacker cannot install or persist
 anything on a read-only, capability-stripped, no-new-privileges container.
 
+Those scratch `tmpfs` mounts are themselves hardened: `nosuid,nodev` on every
+service, plus `noexec` everywhere **except `immich-ml`** — its ML runtime
+(`onnxruntime` et al.) mmaps executable pages from a temp file under `/tmp` at
+import, so `noexec` there kills the worker boot (the gunicorn master stays up but
+`/ping` never answers), leaving it on `nosuid,nodev`. `noexec` closes the last gap
+in the read-only guarantee: `/tmp` was the one writable path where a dropped binary
+could still be executed.
+
 Per-image status (verified on the live stack — **8 of 9 services run a
 read-only root filesystem**; the one exception (`seafile-server`) is a stock-image
 limitation and keeps every other control):
 
 | Service | Non-root | Read-only rootfs | Notes |
 |---------|----------|------------------|-------|
-| caddy | root + only `NET_BIND_SERVICE` | ✅ yes | must bind 80/443 |
+| caddy | ✅ **uid 1001** + only `NET_BIND_SERVICE` | ✅ yes | edge proxy; runs non-root (uid 1001, distinct from the uid-1000 apps) and keeps the one cap needed to bind 80/443 (the image's caddy binary carries it as a file capability); `volume-init` chowns its data/config |
 | vaultwarden | ✅ **uid 1000** | ✅ yes | data volume chowned by `volume-init` |
 | immich-db | ✅ process drops to `postgres` | ✅ yes | minimal caps for entrypoint chown + privilege drop |
 | seafile-db | ✅ process drops to `mysql` | ✅ yes | MariaDB; same minimal cap set as the Postgres tier |

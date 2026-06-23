@@ -12,6 +12,9 @@
 {
 	# Admin API on loopback only (the healthcheck hits it).
 	admin localhost:2019
+	# Static Caddyfile — don't autosave the loaded JSON config to /config, the only
+	# write that volume would otherwise take.
+	persist_config off
 }
 
 # Shared response headers. No prefix = replace, so upstreams can't leave duplicates.
