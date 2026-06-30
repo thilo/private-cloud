@@ -24,14 +24,16 @@ verification scripts), outbound internet.
 ```bash
 ./scripts/init.sh          # generate .env (runtime) + .env.setup (admin accounts), run once
 
-# FIRST start only — the setup overlay + setup env file seed the admin accounts:
+# FIRST start only — the setup overlay + setup env file seed the admin accounts
+# (and open Vaultwarden signups so you can register your first account):
 docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \
   -f docker-compose.setup.yml --env-file .env --env-file .env.setup up -d
 
 ./scripts/bootstrap.sh     # create the Immich admin
+# register your Vaultwarden account now in a browser, while the web vault + signups are open (see below)
 ./scripts/verify.sh        # run the three acceptance tests
 
-# Day-to-day afterwards is just:  docker compose up -d
+# Day-to-day afterwards is just:  docker compose up -d   (Vaultwarden back to API-only, signups closed)
 ```
 
 The initial admin passwords are **setup-only** secrets and live in a separate
@@ -43,7 +45,22 @@ Local URLs (the `*.127.0.0.1.nip.io` names resolve to `127.0.0.1` automatically)
 |-----|-----|-------|
 | Seafile | https://seafile.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
 | Immich | https://immich.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
-| Vaultwarden | https://vault.127.0.0.1.nip.io:8443 | register in the web vault |
+| Vaultwarden | https://vault.127.0.0.1.nip.io:8443 | register the first account — see below |
+
+**First Vaultwarden account.** Vaultwarden seeds no admin from env — registration
+is the only path to a first account — but at runtime it is hardened to **API-only**:
+signups are closed (`VAULTWARDEN_SIGNUPS_ALLOWED=false`), the admin panel is off
+(`VAULTWARDEN_ADMIN_TOKEN` empty), and the browser web vault is disabled
+(`WEB_VAULT_ENABLED=false`, so the URL 404s). The **setup overlay turns the web
+vault and signups back on for the initial `up`** (the same overlay that seeds the
+Seafile admin): while the stack is running from that first-time command above, open
+https://vault.127.0.0.1.nip.io:8443 in a browser and register your account. The
+next plain `docker compose up -d` omits the overlay and returns Vaultwarden to
+**API-only** automatically (no web UI, signups closed) — no manual toggle needed.
+For daily use after that, point a **Bitwarden browser extension or app** at the
+same server URL (the API stays available). (`verify.sh` registers through its own
+short-lived API toggle and cleans up after itself, so it neither needs nor leaves
+an open signup window.)
 
 Your browser will warn about the certificate because Caddy uses its **internal
 CA** locally. Either accept the warning, or trust the root once:
@@ -77,8 +94,12 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 - **Immich (iOS):** App Store → Immich → server URL = your `https://immich.…`,
   log in, enable background backup of your camera roll.
 - **Vaultwarden (Bitwarden apps):** in any Bitwarden client set *Self-hosted* →
-  Server URL = your `https://vault.…`, then register/log in. Enable 2FA under
-  Settings → Security → Two-step login (Authenticator app / passkey).
+  Server URL = your `https://vault.…`, then log in. Create the first account
+  during initial setup, while the setup overlay has the web vault + signups open
+  (see [First Vaultwarden account](#quick-start-local-test)); afterwards
+  Vaultwarden is API-only (no browser web vault), so daily use is through the
+  Bitwarden extension/apps. Enable 2FA under Settings → Security → Two-step login
+  (Authenticator app / passkey).
 
 ## Production deployment
 
@@ -137,17 +158,19 @@ sudo -E ./scripts/prod-setup.sh
 ```
 
 **5. Bring it up.** The **first** `up` adds the setup overlay + setup env file to
-seed the Seafile admin; every later `up` omits both:
+seed the Seafile admin (and open Vaultwarden signups for first registration);
+every later `up` omits both:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.production.yml \
   -f docker-compose.setup.yml \
   --env-file /root/.env.production --env-file /root/.env.production.setup up -d
 ./scripts/bootstrap.sh           # create the Immich admin
+# register your Vaultwarden account now in a browser, while the web vault + signups are open
 ./scripts/tune-seafile.sh        # cut seahub workers to 2 (after fresh setup)
 ./scripts/verify.sh              # acceptance tests
 
-# Day-to-day afterwards (prod.env already sourced):  docker compose up -d
+# Day-to-day afterwards (prod.env already sourced):  docker compose up -d   (web vault off, signups closed)
 ```
 
 For a CA-DNS challenge (wildcard certs / no inbound 80) build Caddy with your
@@ -364,7 +387,10 @@ up -d` never puts admin creds into a container's environment. Seafile's first-bo
 seeding vars (`INIT_SEAFILE_ADMIN_*`, `INIT_SEAFILE_MYSQL_ROOT_PASSWORD`) live in a
 small overlay, `docker-compose.setup.yml`, applied only on the first `up`; afterwards
 they are absent from `docker inspect pc-seafile`. (Immich's admin creds were never in
-a container env — only `bootstrap.sh` reads them via the setup file.)
+a container env — only `bootstrap.sh` reads them via the setup file.) The same overlay
+also flips `SIGNUPS_ALLOWED=true` and `WEB_VAULT_ENABLED=true` on Vaultwarden for that
+first `up` so you can register your account in the browser; the next plain `up` reverts
+both to the hardened runtime defaults (signups closed, API-only).
 
 Once your accounts exist, the secret of record is the account itself: **store the
 admin passwords in Vaultwarden.** You can keep the setup file (so `verify.sh` runs

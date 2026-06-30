@@ -28,3 +28,15 @@ services:
       INIT_SEAFILE_ADMIN_PASSWORD: ${SEAFILE_ADMIN_PASSWORD}
       # Root password used once to create the seafile DBs/users on first boot.
       INIT_SEAFILE_MYSQL_ROOT_PASSWORD: ${SEAFILE_DB_ROOT_PASSWORD}
+
+  vaultwarden:
+    environment:
+      # Vaultwarden seeds no admin from env (registration is the only path to a
+      # first account), so for the initial `up` open signups AND turn the web
+      # vault UI back on, long enough to register your account in a browser at
+      # the vault URL. The base file keeps both at their hardened runtime
+      # defaults (SIGNUPS_ALLOWED=false, WEB_VAULT_ENABLED=false), so the next
+      # plain `docker compose up -d` — which omits this overlay — closes signups
+      # and returns Vaultwarden to API-only.
+      SIGNUPS_ALLOWED: "true"
+      WEB_VAULT_ENABLED: "true"
