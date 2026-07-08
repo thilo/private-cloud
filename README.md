@@ -22,30 +22,38 @@ Requirements: Docker + Docker Compose, `node` and `python3` on the host (for the
 verification scripts), outbound internet.
 
 ```bash
-./scripts/init.sh          # generate .env (runtime) + .env.setup (admin accounts), run once
+./scripts/init.sh          # generate .env (runtime) + .env.setup (Seafile admin), run once
 
-# FIRST start only — the setup overlay + setup env file seed the admin accounts
+# FIRST start only — the setup overlay + setup env file seed the Seafile admin
 # (and open Vaultwarden signups so you can register your first account):
 docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \
   -f docker-compose.setup.yml --env-file .env --env-file .env.setup up -d
 
-./scripts/bootstrap.sh     # create the Immich admin
-# register your Vaultwarden account now in a browser, while the web vault + signups are open (see below)
+# register your Immich + Vaultwarden accounts now in a browser, while the setup
+# overlay is up (Immich's admin-sign-up is open; Vaultwarden's web vault + signups are on — see below)
 ./scripts/verify.sh        # run the three acceptance tests
 
 # Day-to-day afterwards is just:  docker compose up -d   (Vaultwarden back to API-only, signups closed)
 ```
 
-The initial admin passwords are **setup-only** secrets and live in a separate
+The initial Seafile admin password is a **setup-only** secret and lives in a separate
 `.env.setup` (not loaded at runtime) — see [Secrets: setup vs runtime](#secrets-setup-vs-runtime).
+Immich and Vaultwarden have no stored admin password: register their first accounts in the browser.
 
 Local URLs (the `*.127.0.0.1.nip.io` names resolve to `127.0.0.1` automatically):
 
 | App | URL | Login |
 |-----|-----|-------|
 | Seafile | https://seafile.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
-| Immich | https://immich.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
+| Immich | https://immich.127.0.0.1.nip.io:8443 | register the first account — see below |
 | Vaultwarden | https://vault.127.0.0.1.nip.io:8443 | register the first account — see below |
+
+**First Immich account.** Immich's admin-sign-up page is open until the first admin
+exists, then closes itself, and its web UI is always on — so no setup toggle is
+needed. While the stack is up, open https://immich.127.0.0.1.nip.io:8443 and create
+your admin in the browser (nothing is stored on disk). `verify.sh` checks whether
+that admin exists yet (`server/config.isInitialized`): if not, it skips the photo
+test with a hint; if so, it prompts for the admin email + password.
 
 **First Vaultwarden account.** Vaultwarden seeds no admin from env — registration
 is the only path to a first account — but at runtime it is hardened to **API-only**:
@@ -130,7 +138,7 @@ ssh root@<server> 'chmod 600 /root/.env.production /root/.env.production.setup'
 ```
 
 `.env.production.setup` is **setup-only** — Compose does not load it at runtime; it
-is read only during the first `up` and by `bootstrap.sh` / `verify.sh`. See
+is read only during the first `up` and by `verify.sh`. See
 [Secrets: setup vs runtime](#secrets-setup-vs-runtime).
 
 The `prod.env` switch points every later command at production (base + overlay +
@@ -165,8 +173,7 @@ every later `up` omits both:
 docker compose -f docker-compose.yml -f docker-compose.production.yml \
   -f docker-compose.setup.yml \
   --env-file /root/.env.production --env-file /root/.env.production.setup up -d
-./scripts/bootstrap.sh           # create the Immich admin
-# register your Vaultwarden account now in a browser, while the web vault + signups are open
+# register your Immich + Vaultwarden accounts now in a browser, while the setup overlay is up
 ./scripts/tune-seafile.sh        # cut seahub workers to 2 (after fresh setup)
 ./scripts/verify.sh              # acceptance tests
 
@@ -313,8 +320,8 @@ settings (all on `immich-server`):
 | `IMMICH_TRUSTED_PROXIES=${PROXY_SUBNET}` | Immich reads the real client IP from Caddy's `X-Forwarded-For`, so the login rate-limiter and audit logs see the client rather than the proxy |
 
 The `/api/auth/admin-sign-up` endpoint only ever creates the *first* admin and is
-rejected once one exists, so after `bootstrap.sh` runs it is already closed — no
-`IMMICH_ALLOW_SETUP` flag is needed.
+rejected once one exists, so once you register the admin in the browser it is
+already closed — no `IMMICH_ALLOW_SETUP` flag is needed.
 
 The Immich **system settings** (version-check, machine learning, sharing, etc.)
 are deliberately *not* pinned via `IMMICH_CONFIG_FILE` — they stay editable in the
@@ -378,25 +385,26 @@ into the running stack on every `up` never include human-account passwords:
 | | **Runtime** secrets | **Setup-only** secrets |
 |---|---|---|
 | File (local / prod) | `.env` / `/root/.env.production` | `.env.setup` / `/root/.env.production.setup` |
-| Loaded by | Compose, on **every** `up` | only `init.sh`, `bootstrap.sh`, `verify.sh`, and the **first** `up` |
-| Contents | DB / Redis passwords, `SEAFILE_JWT_KEY`, `SB_PASSWORD`, `VAULTWARDEN_ADMIN_TOKEN` — machine creds the long-running containers read continuously | `IMMICH_ADMIN_*`, `SEAFILE_ADMIN_*` — used once to create the first admin accounts, then only to log in / run `verify.sh` |
+| Loaded by | Compose, on **every** `up` | only `init.sh`, `verify.sh`, and the **first** `up` |
+| Contents | DB / Redis passwords, `SEAFILE_JWT_KEY`, `SB_PASSWORD`, `VAULTWARDEN_ADMIN_TOKEN` — machine creds the long-running containers read continuously | `SEAFILE_ADMIN_*` — used once to seed the first Seafile admin, then only to log in / run `verify.sh` (Immich + Vaultwarden admins are registered in the browser, so they have no entry) |
 
 `scripts/init.sh` generates both (each `chmod 600`, both gitignored). The setup file
 is **not** referenced by the base `docker-compose.yml`, so a normal `docker compose
 up -d` never puts admin creds into a container's environment. Seafile's first-boot
 seeding vars (`INIT_SEAFILE_ADMIN_*`, `INIT_SEAFILE_MYSQL_ROOT_PASSWORD`) live in a
 small overlay, `docker-compose.setup.yml`, applied only on the first `up`; afterwards
-they are absent from `docker inspect pc-seafile`. (Immich's admin creds were never in
-a container env — only `bootstrap.sh` reads them via the setup file.) The same overlay
+they are absent from `docker inspect pc-seafile`. (Immich's admin is never in the
+setup file at all — it's registered in the browser, as is Vaultwarden's.) The same overlay
 also flips `SIGNUPS_ALLOWED=true` and `WEB_VAULT_ENABLED=true` on Vaultwarden for that
 first `up` so you can register your account in the browser; the next plain `up` reverts
 both to the hardened runtime defaults (signups closed, API-only).
 
 Once your accounts exist, the secret of record is the account itself: **store the
-admin passwords in Vaultwarden.** You can keep the setup file (so `verify.sh` runs
-unattended), or back it up separately and remove it from the box — runtime is
-unaffected either way. Keep both files in your offline backup; losing the runtime
-file means losing the DB/JWT/box credentials.
+admin passwords in Vaultwarden.** You can keep the setup file (so `verify.sh`'s
+Seafile login needs no prompt — it always prompts for the Immich admin either way),
+or back it up separately and remove it from the box — runtime is unaffected either
+way. Keep both files in your offline backup; losing the runtime file means losing
+the DB/JWT/box credentials.
 
 > **Why not file-based (`/run/secrets`) for runtime secrets?** On a single-node,
 > single-user stack the gain is marginal and uneven: reading a container's env needs
@@ -409,8 +417,10 @@ file means losing the DB/JWT/box credentials.
 > container env, above.
 
 **Migrating an existing deployment:** create `/root/.env.production.setup` with the
-five `*_ADMIN_*` lines, remove them from `/root/.env.production`, then run a plain
-`docker compose up -d` — it recreates `seafile-server` with a clean, admin-free env.
+two `SEAFILE_ADMIN_*` lines, remove all `*_ADMIN_*` lines from `/root/.env.production`,
+then run a plain `docker compose up -d` — it recreates `seafile-server` with a clean,
+admin-free env. (The Immich admin already exists in its database, so dropping
+`IMMICH_ADMIN_*` changes nothing at runtime.)
 
 ## Operations
 
@@ -485,7 +495,6 @@ scripts/prod-setup.sh  one-time host prep (cifs-utils, sqlite3, swap, DATA_ROOT 
 scripts/backup.sh      consistent DB/Vaultwarden/Caddy backup to the Storage Box
 scripts/restore.sh     restore from the Storage Box (--check verifies without changing anything)
 scripts/systemd/       pc-backup.service + .timer (daily backup)
-scripts/bootstrap.sh   create the Immich admin
 scripts/tune-seafile.sh  cut seahub gunicorn workers to fit 4 GB (run after fresh setup)
 scripts/harden-seafile.sh  write Seahub security settings to seahub_settings.py (idempotent)
 scripts/verify.sh      the three acceptance tests

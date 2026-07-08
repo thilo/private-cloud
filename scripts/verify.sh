@@ -6,16 +6,17 @@
 #                   + notification server reachable (real-time push) via /notification
 set -uo pipefail
 cd "$(dirname "$0")/.."
-# Runtime config + the setup-only admin secrets live in two files; the login
-# tests need IMMICH_ADMIN_* / SEAFILE_ADMIN_* from the setup file (see README
-# "Secrets: setup vs runtime").
+# Runtime config lives in the runtime env file; the Seafile admin secret lives in
+# the setup file (see README "Secrets: setup vs runtime"). Immich's admin is NOT
+# in any file — its first account is created in the browser, so the Immich test
+# below always prompts for its email + password.
 RUNTIME_ENV="${ENV_FILE:-./.env}"
 SETUP_ENV="${SETUP_ENV_FILE:-${RUNTIME_ENV}.setup}"
 set -a
 . "$RUNTIME_ENV"
 [[ -f "$SETUP_ENV" ]] && . "$SETUP_ENV"
 set +a
-[[ -f "$SETUP_ENV" ]] || echo "  ! setup file $SETUP_ENV not found — admin logins will fail (run ./scripts/init.sh or set SETUP_ENV_FILE)." >&2
+[[ -f "$SETUP_ENV" ]] || echo "  ! setup file $SETUP_ENV not found — the Seafile admin login will fail (run ./scripts/init.sh or set SETUP_ENV_FILE)." >&2
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
@@ -73,12 +74,25 @@ fi
 # ------------------------------------------------------------------- Immich --
 echo "[2/3] Immich — sync a photo (REST API used by the iOS app)"
 im() { curl -sS -k --resolve "${IMMICH_DOMAIN}:${HTTPS_PORT}:${R}" "$@"; }
-login=$(im -X POST "${IM_BASE}/api/auth/login" -H 'Content-Type: application/json' \
-         -d "{\"email\":\"${IMMICH_ADMIN_EMAIL}\",\"password\":\"${IMMICH_ADMIN_PASSWORD}\"}")
-token=$(printf '%s' "$login" | jget accessToken)
-if [[ -z "$token" ]]; then
-  no "Immich admin login failed: $login"
+# The first Immich admin is created in the browser: admin-sign-up is open until an
+# admin exists, then self-closes. server/config.isInitialized (a public field the
+# login page itself reads) tells us which case we're in:
+#   false -> no admin yet — nothing to log in as, so skip with a hint.
+#   true  -> admin exists — log in for the photo test. The password is in no file,
+#            so always prompt for the admin's email + password (password hidden).
+im_initialized=$(im "${IM_BASE}/api/server/config" 2>/dev/null | jget isInitialized 2>/dev/null)
+token=""
+if [[ "$im_initialized" != "True" ]]; then
+  info "Immich has no admin yet — register it in the browser at ${IM_BASE}, then re-run verify.sh for the photo test. Skipping."
 else
+  read -r -p "    Immich admin email: " IMMICH_ADMIN_EMAIL
+  read -r -s -p "    Immich admin password (input hidden): " IMMICH_ADMIN_PASSWORD; echo
+  login=$(im -X POST "${IM_BASE}/api/auth/login" -H 'Content-Type: application/json' \
+           -d "{\"email\":\"${IMMICH_ADMIN_EMAIL}\",\"password\":\"${IMMICH_ADMIN_PASSWORD}\"}")
+  token=$(printf '%s' "$login" | jget accessToken)
+  [[ -z "$token" ]] && no "Immich admin login failed: $login"
+fi
+if [[ -n "$token" ]]; then
   ok "logged in as ${IMMICH_ADMIN_EMAIL}"
   img="$tmp/pc-verify.jpg"
   if command -v magick >/dev/null 2>&1; then magick -size 48x48 xc:skyblue "$img"
