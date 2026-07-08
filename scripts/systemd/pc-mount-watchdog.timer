@@ -1,0 +1,10 @@
+[Unit]
+Description=private-cloud Storage Box mount watchdog (every minute)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

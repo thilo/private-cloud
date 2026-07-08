@@ -1,0 +1,9 @@
+[Unit]
+Description=private-cloud Storage Box mount watchdog (detect + remount wedged CIFS)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/private-cloud
+ExecStart=/opt/private-cloud/scripts/mount-watchdog.sh

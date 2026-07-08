@@ -377,6 +377,19 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt:
       - no-new-privileges:true
+    # Also stat the Storage Box CIFS mount (library/ is on the box; thumbs/ and
+    # encoded-video/ are local) so a wedged SMB session reads as unhealthy, not
+    # healthy-with-dead-storage. Recovery: scripts/mount-watchdog.sh.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "immich-healthcheck && timeout 8 stat /data/library >/dev/null 2>&1",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
 
   immich-ml:
     image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION}
@@ -573,13 +586,16 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
+      # Also stat the Storage Box CIFS mount (a child path forces a network
+      # revalidate) so a wedged SMB session reads as unhealthy, not
+      # healthy-with-dead-storage. Recovery: scripts/mount-watchdog.sh.
       test:
         [
           "CMD-SHELL",
-          "curl -fsS http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1",
+          "curl -fsS http://127.0.0.1:80/ >/dev/null 2>&1 && timeout 8 stat /shared/seafile/seafile-data >/dev/null 2>&1",
         ]
       interval: 30s
-      timeout: 10s
+      timeout: 12s
       retries: 10
       start_period: 180s
 

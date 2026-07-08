@@ -159,7 +159,8 @@ the Let's Encrypt HTTP challenge and HTTP→HTTPS redirects. The databases sit o
 
 **4. Prepare the host** (installs `cifs-utils` and `sqlite3` — the latter for
 consistent Vaultwarden backups — adds swap if missing, creates the `DATA_ROOT`
-subdirs, and creates/validates the Storage Box subfolders):
+subdirs, creates/validates the Storage Box subfolders, and installs + enables the
+`systemd` timers for the daily backup and the mount watchdog):
 
 ```bash
 sudo -E ./scripts/prod-setup.sh
@@ -452,12 +453,10 @@ artifact is written to a `.partial` file, verified (`gzip -t`), then atomically
 renamed, and a `backup-manifest.txt` (sizes + sha256) is written last as the
 completion marker. It overwrites a single latest set and **relies on the box's
 free, automatic snapshots for dated history** (so enable those). The bulk blobs
-are already on the box and are not re-copied. A daily `systemd` timer runs it:
+are already on the box and are not re-copied. `prod-setup.sh` installs + enables
+the daily `systemd` timer (re-run it to refresh the unit after an update):
 
 ```bash
-# one-time install on the server (run once):
-cp scripts/systemd/pc-backup.* /etc/systemd/system/ && systemctl daemon-reload
-systemctl enable --now pc-backup.timer
 systemctl list-timers pc-backup.timer        # next run (default 03:30 daily)
 journalctl -u pc-backup.service -n 20         # last run
 source scripts/prod.env && sudo -E ./scripts/backup.sh   # run on demand
@@ -480,6 +479,19 @@ sudo -E ./scripts/restore.sh --yes          # restore everything
 
 Run `--check` periodically to confirm the latest backup is actually restorable.
 
+**Storage Box mount watchdog (`scripts/mount-watchdog.sh`):** the kernel CIFS
+mount can wedge when the Storage Box migrates (an `STATUS_LOGON_FAILURE` loop) —
+the mount dies while the app still answers, so requests `502` silently. The Seafile
+and Immich healthchecks stat a path under the mount so a wedge reads as `unhealthy`,
+and a host `systemd` timer runs the watchdog every 60s to restart a wedged container
+(the only way to remount a Docker CIFS volume; a per-container cooldown avoids
+thrashing if the box is down). `prod-setup.sh` installs + enables the timer; events
+go to the journal.
+
+```bash
+journalctl -u pc-mount-watchdog.service -n 20    # recent checks / restarts
+```
+
 ## Files
 
 ```
@@ -491,10 +503,11 @@ docker-compose.storagebox-sim.yml  local Samba server that simulates the Storage
 caddy/Caddyfile        reverse proxy + automatic HTTPS
 scripts/init.sh        generate env-file secrets (.env or .env.production)
 scripts/prod.env       source to point compose + scripts at production
-scripts/prod-setup.sh  one-time host prep (cifs-utils, sqlite3, swap, DATA_ROOT dirs, Storage Box folders)
+scripts/prod-setup.sh  one-time host prep (cifs-utils, sqlite3, swap, DATA_ROOT dirs, Storage Box folders, systemd timers)
 scripts/backup.sh      consistent DB/Vaultwarden/Caddy backup to the Storage Box
 scripts/restore.sh     restore from the Storage Box (--check verifies without changing anything)
-scripts/systemd/       pc-backup.service + .timer (daily backup)
+scripts/mount-watchdog.sh  detect + remount a wedged Storage Box CIFS mount (host systemd timer)
+scripts/systemd/       pc-backup.* (daily backup) + pc-mount-watchdog.* (CIFS mount watchdog)
 scripts/tune-seafile.sh  cut seahub gunicorn workers to fit 4 GB (run after fresh setup)
 scripts/harden-seafile.sh  write Seahub security settings to seahub_settings.py (idempotent)
 scripts/verify.sh      the three acceptance tests
