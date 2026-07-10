@@ -31,9 +31,6 @@ volumes:
   caddy_data:
     driver: local
     driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/caddy_data" }
-  caddy_config:
-    driver: local
-    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/caddy_config" }
   vaultwarden_data:
     driver: local
     driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/vaultwarden_data" }

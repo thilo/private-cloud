@@ -18,7 +18,9 @@
 #   7. installs + enables the systemd timers (daily backup + mount watchdog).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . "${ENV_FILE:-.env.production}"; set +a
+ENV_FILE="${ENV_FILE:-.env.production}"
+[[ -f "$ENV_FILE" ]] || { echo "$ENV_FILE not found — run: source scripts/prod.env" >&2; exit 1; }
+set -a; . "$ENV_FILE"; set +a
 
 if [[ $EUID -ne 0 ]]; then echo "Run as root (sudo -E $0)." >&2; exit 1; fi
 
@@ -46,15 +48,15 @@ else
 fi
 
 echo "==> [3/7] data directories on the attached volume (${DATA_ROOT})"
-for d in caddy_data caddy_config vaultwarden_data immich_db immich_modelcache \
+for d in caddy_data vaultwarden_data immich_db immich_modelcache \
          immich_thumbs immich_encoded seafile_db seafile_data; do
   mkdir -p "${DATA_ROOT}/${d}"
 done
-echo "    created: ${DATA_ROOT}/{caddy_data,caddy_config,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data}"
+echo "    created: ${DATA_ROOT}/{caddy_data,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data}"
 
 echo "==> [4/7] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile})"
 if [[ -z "${SB_PASSWORD:-}" || "$SB_PASSWORD" == "CHANGEME" ]]; then
-  echo "    SB_PASSWORD is not set in ${ENV_FILE:-.env.production} — skipping." >&2
+  echo "    SB_PASSWORD is not set in ${ENV_FILE} — set it, then re-run." >&2
   exit 1
 fi
 tmpmnt="$(mktemp -d)"

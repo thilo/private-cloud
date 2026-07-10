@@ -22,7 +22,9 @@
 # latest backup is intact and restorable without changing anything).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . "${ENV_FILE:-.env.production}"; set +a
+ENV_FILE="${ENV_FILE:-.env.production}"
+[[ -f "$ENV_FILE" ]] || { echo "$ENV_FILE not found — run: source scripts/prod.env" >&2; exit 1; }
+set -a; . "$ENV_FILE"; set +a
 
 if [[ $EUID -ne 0 ]]; then echo "Run as root (sudo -E $0)." >&2; exit 1; fi
 

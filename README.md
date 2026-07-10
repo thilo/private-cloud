@@ -175,7 +175,7 @@ docker compose -f docker-compose.yml -f docker-compose.production.yml \
   -f docker-compose.setup.yml \
   --env-file /root/.env.production --env-file /root/.env.production.setup up -d
 # register your Immich + Vaultwarden accounts now in a browser, while the setup overlay is up
-./scripts/tune-seafile.sh        # cut seahub workers to 2 (after fresh setup)
+./scripts/harden-seafile.sh      # Seahub security block + cut workers to 2 (after fresh setup)
 ./scripts/verify.sh              # acceptance tests
 
 # Day-to-day afterwards (prod.env already sourced):  docker compose up -d   (web vault off, signups closed)
@@ -264,7 +264,8 @@ production overlay simply never includes `docker-compose.storagebox-sim.yml`).
 Applied to every service: `security_opt: no-new-privileges`, `cap_drop: ALL`
 (plus only the capabilities an image genuinely needs), pinned images, databases
 on egress-blocked `internal:` networks, and a single ingress (only Caddy
-publishes ports). A **read-only root filesystem** + `tmpfs` for scratch is the
+publishes ports). The unauthenticated immich-ml API sits on its own `ml`
+network reachable only from immich-server, not on the shared proxy bridge. A **read-only root filesystem** + `tmpfs` for scratch is the
 mechanism that satisfies "remove dev tools / package managers": even though the
 stock images still contain `apt`/`apk`, an attacker cannot install or persist
 anything on a read-only, capability-stripped, no-new-privileges container.
@@ -349,9 +350,9 @@ while the ML model is still idle.
 |---------|-------------|--------|
 | immich-server | 1024M | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap) |
 | immich-ml | 1024M | idle-model unload (`MODEL_TTL=300`), 1 worker, serialized inference |
-| seafile-server | 640M | seahub gunicorn workers 5→2 (`scripts/tune-seafile.sh`) |
+| seafile-server | 640M | seahub gunicorn workers 5→2 (`scripts/harden-seafile.sh`) |
 | immich-db | 768M | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM. 768M (not 512M) clears the one-time first-boot reverse-geocoding import, which peaks ~680M |
-| seafile-db | 320M | MariaDB `innodb_buffer_pool=96M`, `performance_schema=OFF` |
+| seafile-db | 160M | MariaDB `innodb_buffer_pool=96M`, `performance_schema=OFF` |
 | notification-server | 64M | lightweight Go websocket sidecar for real-time push; idles at ~3M, so the ceiling is pure headroom |
 | caddy / vaultwarden / immich-redis / seafile-redis | 96M each | seafile-redis is a pure cache (`maxmemory 48M` + LRU); immich-redis is the BullMQ job broker, so it is **not** evicted |
 
@@ -359,19 +360,19 @@ while the ML model is still idle.
 > `-c config_file=/etc/postgresql/postgresql.conf` (kept in `command:`) — that conf
 > carries the VectorChord `shared_preload_libraries`, which must not be dropped.
 
-After a **fresh** setup (new `seafile_data` volume), apply the seahub worker
-reduction once it's bootstrapped:
+After a **fresh** setup (new `seafile_data` volume), apply the Seafile config once
+it's bootstrapped:
 
 ```bash
-./scripts/tune-seafile.sh          # cuts seahub gunicorn workers to 2 (~430 MB)
-./scripts/harden-seafile.sh        # writes the Seahub security block + restarts
+./scripts/harden-seafile.sh        # Seahub security block + workers 5→2, one restart
 ```
 
 `harden-seafile.sh` adds settings the `seafile-mc` image won't take from compose
 `environment:` — secure/SameSite cookies, password-strength + login-attempt limits,
 2FA availability, and forced-password/bounded-expiry share & upload links — into
-`conf/seahub_settings.py`. It's idempotent (re-running replaces its managed block);
-edit the script, not the generated file. Two self-lockout-prone options
+`conf/seahub_settings.py`, and cuts the seahub gunicorn workers to 2 (~430 MB;
+override with `SEAHUB_WORKERS=N`). It's idempotent (re-running replaces its managed
+block); edit the script, not the generated files. Two self-lockout-prone options
 (`FREEZE_USER_ON_LOGIN_FAILED`, force-2FA) are left commented — enabling them breaks
 the admin password→token API login that the clients and `verify.sh` use.
 
@@ -508,8 +509,7 @@ scripts/backup.sh      consistent DB/Vaultwarden/Caddy backup to the Storage Box
 scripts/restore.sh     restore from the Storage Box (--check verifies without changing anything)
 scripts/mount-watchdog.sh  detect + remount a wedged Storage Box CIFS mount (host systemd timer)
 scripts/systemd/       pc-backup.* (daily backup) + pc-mount-watchdog.* (CIFS mount watchdog)
-scripts/tune-seafile.sh  cut seahub gunicorn workers to fit 4 GB (run after fresh setup)
-scripts/harden-seafile.sh  write Seahub security settings to seahub_settings.py (idempotent)
+scripts/harden-seafile.sh  Seahub security settings + worker count (idempotent, run after fresh setup)
 scripts/verify.sh      the three acceptance tests
 scripts/vw-test.mjs    Bitwarden-client crypto used by the password test
 ```

@@ -15,10 +15,12 @@
 # Vaultwarden SQLite snapshot, all WITHOUT changing anything live.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . "${ENV_FILE:-.env.production}"; set +a
+ENV_FILE="${ENV_FILE:-.env.production}"
+[[ -f "$ENV_FILE" ]] || { echo "$ENV_FILE not found — run: source scripts/prod.env" >&2; exit 1; }
+set -a; . "$ENV_FILE"; set +a
 # Make `docker compose` target the production stack even if prod.env wasn't sourced.
 export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml:docker-compose.production.yml}"
-export COMPOSE_ENV_FILES="${COMPOSE_ENV_FILES:-.env.production}"
+export COMPOSE_ENV_FILES="${COMPOSE_ENV_FILES:-$ENV_FILE}"
 
 [[ $EUID -eq 0 ]] || { echo "Run as root (sudo -E $0)." >&2; exit 1; }
 

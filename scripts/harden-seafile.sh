@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
-# Apply Seafile (Seahub) security settings that the seafile-mc image will not take
-# from compose `environment:`.
+# Apply the Seafile config this stack needs but the seafile-mc image will not take
+# from compose `environment:`. Two files, both generated into the seafile_data
+# volume on first setup:
+#
+#   conf/seahub_settings.py  — Seahub security settings (managed block, below)
+#   conf/gunicorn.conf.py    — seahub worker count 5 -> ${SEAHUB_WORKERS:-2}
+#                              (5 Django workers x ~130 MB blow the 4 GB budget)
 #
 # The image only maps a fixed allow-list of env vars into its config (DB creds,
 # admin, hostname, JWT, the ENABLE_* feature toggles). Arbitrary Seahub keys such
 # as CSRF_COOKIE_SECURE / LOGIN_ATTEMPT_LIMIT / SHARE_LINK_* are ignored there and
 # must live in conf/seahub_settings.py — a Python file, so some values are
 # expressions. This idempotently writes a single MANAGED block (between the markers
-# below) into that file and restarts seahub. Re-running replaces the block in place;
-# edit THIS script, not the generated file. The change persists in the seafile_data
-# volume across container recreation.
+# below) into that file, sets the worker count, and restarts Seafile once iff
+# anything changed. Re-running replaces the block in place; edit THIS script, not
+# the generated files. The changes persist in the volume across recreation.
 #
 # Run once after a *fresh* setup (new volume), and again whenever you change the
-# block. Requires the seafile-server container to be up (it edits the generated
-# conf via `docker compose cp`, same mechanism as tune-seafile.sh).
+# block or SEAHUB_WORKERS. Requires the seafile-server container to be up (it
+# edits the generated conf via `docker compose cp`).
 #
 # Two settings are intentionally left OFF (commented in the block) because they
 # break the admin password->token API login that the clients and scripts/verify.sh
@@ -23,17 +28,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CONF=/opt/seafile/conf/seahub_settings.py
+SEAHUB_CONF=/opt/seafile/conf/seahub_settings.py
+GUNICORN_CONF=/opt/seafile/conf/gunicorn.conf.py
+WORKERS="${SEAHUB_WORKERS:-2}"
 BEGIN='# >>> pc-hardening (managed by scripts/harden-seafile.sh) >>>'
 END='# <<< pc-hardening <<<'
 
 TMP="$(mktemp)"
 DESIRED="$(mktemp)"
 BLOCK="$(mktemp)"
-trap 'rm -f "$TMP" "$DESIRED" "$BLOCK"' EXIT
+GTMP="$(mktemp)"
+trap 'rm -f "$TMP" "$DESIRED" "$BLOCK" "$GTMP" "$GTMP.new"' EXIT
 
-if ! docker compose cp seafile-server:"$CONF" "$TMP" 2>/dev/null; then
-  echo "Could not read $CONF — is pc-seafile up and past first-run setup?" >&2
+if ! docker compose cp seafile-server:"$SEAHUB_CONF" "$TMP" 2>/dev/null; then
+  echo "Could not read $SEAHUB_CONF — is pc-seafile up and past first-run setup?" >&2
   exit 1
 fi
 
@@ -103,11 +111,31 @@ awk -v b="$BEGIN" -v e="$END" '
   printf '%s\n' "$END"
 } >> "$DESIRED"
 
+changed=0
+
 if diff -q "$TMP" "$DESIRED" >/dev/null 2>&1; then
-  echo "seahub_settings.py already current — nothing to do."
-  exit 0
+  echo "seahub_settings.py already current."
+else
+  docker compose cp "$DESIRED" seafile-server:"$SEAHUB_CONF"
+  echo "Wrote the pc-hardening block to seahub_settings.py."
+  changed=1
 fi
 
-docker compose cp "$DESIRED" seafile-server:"$CONF"
-docker compose restart seafile-server >/dev/null
-echo "Wrote the pc-hardening block to seahub_settings.py and restarted Seafile."
+# Seahub gunicorn worker count (image default: workers = 5).
+docker compose cp seafile-server:"$GUNICORN_CONF" "$GTMP"
+if grep -qE "^workers = ${WORKERS}\$" "$GTMP"; then
+  echo "Seahub already at ${WORKERS} workers."
+else
+  # Portable (BSD/GNU) edit via a second temp file.
+  sed -E "s/^workers = .*/workers = ${WORKERS}/" "$GTMP" > "$GTMP.new"
+  docker compose cp "$GTMP.new" seafile-server:"$GUNICORN_CONF"
+  echo "Set seahub gunicorn workers to ${WORKERS}."
+  changed=1
+fi
+
+if [[ "$changed" == 1 ]]; then
+  docker compose restart seafile-server >/dev/null
+  echo "Restarted Seafile."
+else
+  echo "Nothing to do."
+fi
