@@ -324,7 +324,7 @@ services:
       retries: 5
 
   immich-server:
-    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION}
+    image: ghcr.io/open-noodle/gallery-server:${IMMICH_VERSION}
     container_name: pc-immich-server
     restart: *restart
     # 2048m (not 1024m): steady state is ~800M, but the boot-time geodata import
@@ -402,7 +402,7 @@ services:
       start_period: 120s
 
   immich-ml:
-    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION}
+    image: ghcr.io/open-noodle/gallery-ml:${IMMICH_VERSION}
     container_name: pc-immich-ml
     restart: *restart
     mem_limit: 1024m

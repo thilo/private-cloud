@@ -5,8 +5,9 @@ Self-hosted replacements for the usual cloud subscriptions, in one
 
 - **Seafile** — file sync (replaces Dropbox / iCloud Drive), with
   **client-side encrypted libraries** the server cannot read
-- **Immich** — automatic iPhone camera-roll backup (replaces Google / iCloud
-  Photos), with ML search running locally
+- **Noodle Gallery** — automatic iPhone camera-roll backup (replaces Google /
+  iCloud Photos), with ML search running locally. A rebasing fork of **Immich**
+  (see [Photos: why the Gallery fork](#photos-why-the-gallery-fork))
 - **Vaultwarden** — password manager with TOTP 2FA, compatible with the
   official **Bitwarden** apps and extensions
 
@@ -291,8 +292,10 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
   E2EE, create an **encrypted library** (set a library password) — the
   password never leaves your device, so the server only ever stores
   ciphertext. The iOS app prompts for that password to unlock the library.
-- **Immich (iOS):** App Store → Immich → server URL = your `https://immich.…`,
-  log in, enable background backup of your camera roll.
+- **Photos (iOS):** App Store → *Immich* **or** *Noodle Gallery* → server URL =
+  your `https://immich.…`, log in, enable background backup of your camera roll.
+  The fork keeps Immich's API, so either app works; the Gallery app is the one
+  that exposes the fork-only features.
 - **Vaultwarden (Bitwarden apps):** in any Bitwarden client set *Self-hosted*
   → Server URL = your `https://vault.…`, then log in. Create the first account
   during initial setup, while the setup overlay has the web vault + signups
@@ -371,6 +374,31 @@ The Immich **system settings** (version-check, machine learning, sharing,
 etc.) are deliberately *not* pinned via `IMMICH_CONFIG_FILE` — they stay
 editable in the admin UI; harden them there if you want.
 
+## Photos: why the Gallery fork
+
+The photo service runs [Noodle Gallery](https://github.com/open-noodle/gallery)
+(`ghcr.io/open-noodle/gallery-server` + `-ml`) rather than upstream Immich. It is
+a friendly fork that rebases onto every Immich release and keeps the same REST
+API, so the official Immich iOS/Android apps, the CLI and third-party clients
+all work unchanged. Everything else here is unaffected: the service names,
+volumes, `IMMICH_*` environment variables, networks and Caddy route are
+identical — only the two image names differ.
+
+`IMMICH_VERSION` therefore carries the **fork's** version (`v5.2.2`), not
+Immich's; each release states the upstream Immich version it is based on
+(v5.2.2 = Immich 3.0.3). Read the fork's release notes before bumping, and
+expect a geodata re-import — see [Resource
+limits](#resource-limits-fits-a-4-gb-host).
+
+**Going back to upstream** is the two image names plus an `IMMICH_VERSION` set
+to the base Immich release. The fork-specific tables (`shared_space*`,
+`album_space_*`) are inert to upstream Immich, so a plain image swap is enough
+to run again; the fork also ships `scripts/revert-to-immich.sql` to drop them,
+which **permanently deletes** shared spaces, user groups, pet detection,
+duplicate checksums and classification categories. Back up the database first
+either way, and note that upstream's schema is not downgraded — you land on the
+base release (3.0.3), not an older one.
+
 ## Resource limits (fits a 4 GB host)
 
 The stack is tuned to run on a **4 GB** machine (e.g. a Hetzner **CX22**).
@@ -384,13 +412,13 @@ file catches rare concurrent spikes (an OOM kill becomes a slowdown);
 
 **The geodata import is the sizing constraint.** It re-runs on any version bump
 that ships a new `cities500` dataset — not just first boot — and it spikes
-`immich-server`, not only `immich-db`: measured peak **~1.5 GB** on v3.0.2.
-Under a 1024M ceiling that import is OOM-killed *before it finishes*, so the
-container restarts and re-imports forever. The loop is easy to misread, because
-each cycle logs a complete, healthy-looking boot ("Immich Server is listening")
-right before dying; the only direct evidence is `docker events` showing `oom` /
-`die exit=137`, or `memory.peak` in the container's cgroup. Hence the 2048M
-ceiling below.
+`immich-server`, not only `immich-db`: measured peak **~1.5 GB** on upstream
+v3.0.2 and ~1.4 GB on the Gallery fork. Under a 1024M ceiling that import is
+OOM-killed *before it finishes*, so the container restarts and re-imports
+forever. The loop is easy to misread, because each cycle logs a complete,
+healthy-looking boot ("Immich Server is listening") right before dying; the only
+direct evidence is `docker events` showing `oom` / `die exit=137`, or
+`memory.peak` in the container's cgroup. Hence the 2048M ceiling below.
 
 | Service | `mem_limit` | Tuning |
 |---------|-------------|--------|
