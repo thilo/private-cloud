@@ -327,7 +327,14 @@ services:
     image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION}
     container_name: pc-immich-server
     restart: *restart
-    mem_limit: 1024m
+    # 2048m (not 1024m): steady state is ~800M, but the boot-time geodata import
+    # (227k records, re-runs whenever the bundled cities500 dataset changes) peaks
+    # at ~1.5G. Under a 1024m cap that import is OOM-killed before it finishes, so
+    # the container restarts and re-imports forever — a crash loop that still logs
+    # a full, healthy-looking boot each cycle. The spike is off-heap, so the V8 cap
+    # below stays at 768M. mem_limit is a ceiling, not a reservation: this costs
+    # nothing at rest.
+    mem_limit: 2048m
     cpus: "1.5"
     user: "1000:1000"
     environment:

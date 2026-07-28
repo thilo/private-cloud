@@ -377,14 +377,24 @@ The stack is tuned to run on a **4 GB** machine (e.g. a Hetzner **CX22**).
 Every long-running service has a `mem_limit` (a hard ceiling, not a
 reservation) so no single service can balloon and OOM the host. Steady-state
 usage is **≈ 1.3–1.4 GB**; the ceilings deliberately *over-subscribe* (they sum
-to ~4.2 GB) because they are not all hit at once — the largest spike,
-immich-db's one-time first-boot geodata import, lands while the ML model is
-still idle. A small swap file catches rare concurrent spikes (an OOM kill
-becomes a slowdown); `prod-setup.sh` adds one if missing.
+to ~5.1 GB) because they are not all hit at once — the largest spike, the
+reverse-geocoding import, lands while the ML model is still idle. A small swap
+file catches rare concurrent spikes (an OOM kill becomes a slowdown);
+`prod-setup.sh` adds one if missing.
+
+**The geodata import is the sizing constraint.** It re-runs on any version bump
+that ships a new `cities500` dataset — not just first boot — and it spikes
+`immich-server`, not only `immich-db`: measured peak **~1.5 GB** on v3.0.2.
+Under a 1024M ceiling that import is OOM-killed *before it finishes*, so the
+container restarts and re-imports forever. The loop is easy to misread, because
+each cycle logs a complete, healthy-looking boot ("Immich Server is listening")
+right before dying; the only direct evidence is `docker events` showing `oom` /
+`die exit=137`, or `memory.peak` in the container's cgroup. Hence the 2048M
+ceiling below.
 
 | Service | `mem_limit` | Tuning |
 |---------|-------------|--------|
-| immich-server | 1024M | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap) |
+| immich-server | 2048M | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap). 2048M (not 1024M) clears the geodata import spike above; steady state is ~800M. The spike is off-heap, so the V8 cap stays at 768M |
 | immich-ml | 1024M | idle-model unload (`MODEL_TTL=300`), 1 worker, serialized inference |
 | seafile-server | 640M | seahub gunicorn workers 5→2 (`scripts/harden-seafile.sh`) |
 | immich-db | 768M | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM. 768M (not 512M) clears the one-time first-boot reverse-geocoding import, which peaks ~680M |
