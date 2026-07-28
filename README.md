@@ -222,12 +222,34 @@ URL. (`verify.sh` registers through its own short-lived API toggle and cleans
 up after itself.)
 
 Your browser will warn about the certificate because Caddy uses its
-**internal CA** locally. Either accept the warning, or trust the root once:
+**internal CA** locally. Either accept the warning, or trust the root.
+
+**Always read the root out of the running container — never keep a copy.**
+Caddy generates a new local CA whenever the `caddy_data` volume is recreated
+(`down -v`, a fresh setup, a wiped `DATA_ROOT`), and every generation carries
+the *same* subject name (`Caddy Local Authority - <year> ECC Root`) — only the
+validity dates differ. A saved `caddy-root.crt` therefore goes stale without
+looking stale: `curl` fails with `unable to get local issuer certificate`, and
+a keychain entry still shows the expected name while no longer matching. Read
+it live and the problem cannot arise:
 
 ```bash
-docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
-# macOS: add to login keychain and trust
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain caddy-root.crt
+# curl: read the CA live, no file on disk
+curl --cacert <(docker compose exec -T caddy cat /data/caddy/pki/authorities/local/root.crt) \
+  https://immich.127.0.0.1.nip.io:8443/api/server/ping
+```
+
+`verify.sh` sidesteps this entirely by using `curl -k`.
+
+To trust it in the **macOS** system keychain, use a temp file and delete it
+again. Re-run this after any CA regeneration; `add-trusted-cert` replaces the
+previous entry for the same certificate:
+
+```bash
+docker compose exec -T caddy cat /data/caddy/pki/authorities/local/root.crt > /tmp/caddy-root.crt
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain /tmp/caddy-root.crt
+rm /tmp/caddy-root.crt
 ```
 
 ### The Storage Box simulator
