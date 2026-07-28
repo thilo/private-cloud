@@ -384,20 +384,10 @@ all work unchanged. Everything else here is unaffected: the service names,
 volumes, `IMMICH_*` environment variables, networks and Caddy route are
 identical — only the two image names differ.
 
-`IMMICH_VERSION` therefore carries the **fork's** version (`v5.2.2`), not
-Immich's; each release states the upstream Immich version it is based on
-(v5.2.2 = Immich 3.0.3). Read the fork's release notes before bumping, and
-expect a geodata re-import — see [Resource
+`IMMICH_VERSION` therefore carries the **fork's** version, not Immich's; each
+release states the upstream Immich version it is based on. Read the fork's
+release notes before bumping, and expect a geodata re-import — see [Resource
 limits](#resource-limits-fits-a-4-gb-host).
-
-**Going back to upstream** is the two image names plus an `IMMICH_VERSION` set
-to the base Immich release. The fork-specific tables (`shared_space*`,
-`album_space_*`) are inert to upstream Immich, so a plain image swap is enough
-to run again; the fork also ships `scripts/revert-to-immich.sql` to drop them,
-which **permanently deletes** shared spaces, user groups, pet detection,
-duplicate checksums and classification categories. Back up the database first
-either way, and note that upstream's schema is not downgraded — you land on the
-base release (3.0.3), not an older one.
 
 ## Resource limits (fits a 4 GB host)
 
@@ -412,8 +402,7 @@ file catches rare concurrent spikes (an OOM kill becomes a slowdown);
 
 **The geodata import is the sizing constraint.** It re-runs on any version bump
 that ships a new `cities500` dataset — not just first boot — and it spikes
-`immich-server`, not only `immich-db`: measured peak **~1.5 GB** on upstream
-v3.0.2 and ~1.4 GB on the Gallery fork. Under a 1024M ceiling that import is
+`immich-server`, not only `immich-db`. Given too little memory the import is
 OOM-killed *before it finishes*, so the container restarts and re-imports
 forever. The loop is easy to misread, because each cycle logs a complete,
 healthy-looking boot ("Immich Server is listening") right before dying; the only
@@ -422,7 +411,7 @@ direct evidence is `docker events` showing `oom` / `die exit=137`, or
 
 | Service | `mem_limit` | Tuning |
 |---------|-------------|--------|
-| immich-server | 2048M | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap). 2048M (not 1024M) clears the geodata import spike above; steady state is ~800M. The spike is off-heap, so the V8 cap stays at 768M |
+| immich-server | 2048M | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap) |
 | immich-ml | 1024M | idle-model unload (`MODEL_TTL=300`), 1 worker, serialized inference |
 | seafile-server | 640M | seahub gunicorn workers 5→2 (`scripts/harden-seafile.sh`) |
 | immich-db | 768M | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM. 768M (not 512M) clears the one-time first-boot reverse-geocoding import, which peaks ~680M |
