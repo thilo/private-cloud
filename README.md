@@ -87,7 +87,8 @@ runtime; it is read only during the first `up` and by `verify.sh`. See
 [Secrets: setup vs runtime](#secrets-setup-vs-runtime).
 
 The `prod.env` switch points every later command at production (base + overlay
-+ `/root/.env.production`):
+
+- `/root/.env.production`):
 
 ```bash
 source scripts/prod.env          # sets COMPOSE_FILE / COMPOSE_ENV_FILES / ENV_FILE
@@ -140,13 +141,13 @@ stay on the server's local SSD.
 > low-latency POSIX locking that SMB cannot provide; they will corrupt or crawl.
 > The split below keeps every database local on purpose.
 
-| Data | Location | Volume(s) |
-|------|----------|-----------|
-| Immich originals (`library/`, `upload/`) | **Storage Box** (CIFS) | `immich_data` |
-| Immich thumbnails / transcoded video | local SSD | `immich_thumbs`, `immich_encoded` |
-| Seafile object store + config (`/shared/seafile`) | **Storage Box** (CIFS) | `seafile_box` |
-| Seafile logs | local SSD | `seafile_logs` |
-| All databases + Vaultwarden | local SSD | `immich_db`, `seafile_db`, `vaultwarden_data` |
+| Data                                              | Location               | Volume(s)                                     |
+| ------------------------------------------------- | ---------------------- | --------------------------------------------- |
+| Immich originals (`library/`, `upload/`)          | **Storage Box** (CIFS) | `immich_data`                                 |
+| Immich thumbnails / transcoded video              | local SSD              | `immich_thumbs`, `immich_encoded`             |
+| Seafile object store + config (`/shared/seafile`) | **Storage Box** (CIFS) | `seafile_box`                                 |
+| Seafile logs                                      | local SSD              | `seafile_logs`                                |
+| All databases + Vaultwarden                       | local SSD              | `immich_db`, `seafile_db`, `vaultwarden_data` |
 
 Immich's whole `/data` is the CIFS mount so the upload→library move stays on
 one device (no cross-device rename); `thumbs/` and `encoded-video/` are mounted
@@ -154,7 +155,7 @@ back onto local SSD so browsing stays fast.
 
 Seafile mounts the box one level **above** its object store, at
 `/shared/seafile`, on purpose: the image runs first-time setup only when
-`/shared/seafile/seafile-data` is *absent*, so mounting the empty box there
+`/shared/seafile/seafile-data` is _absent_, so mounting the empty box there
 lets setup build the data tree on the box — a single `docker compose up`, no
 two-phase migration. The chatty per-request logs are carved back to local SSD
 (`seafile_logs`); Seafile's real metadata (libraries, users, file tree) lives
@@ -199,11 +200,11 @@ have no stored admin password: register their first accounts in the browser.
 Local URLs (the `*.127.0.0.1.nip.io` names resolve to `127.0.0.1`
 automatically):
 
-| App | URL | Login |
-|-----|-----|-------|
-| Seafile | https://seafile.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
-| Immich | https://immich.127.0.0.1.nip.io:8443 | register the first account — see below |
-| Vaultwarden | https://vault.127.0.0.1.nip.io:8443 | register the first account — see below |
+| App         | URL                                   | Login                                  |
+| ----------- | ------------------------------------- | -------------------------------------- |
+| Seafile     | https://seafile.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
+| Immich      | https://immich.127.0.0.1.nip.io:8443  | register the first account — see below |
+| Vaultwarden | https://vault.127.0.0.1.nip.io:8443   | register the first account — see below |
 
 **First Immich account.** Immich's admin-sign-up page is open until the first
 admin exists, then closes itself — no setup toggle needed. While the stack is
@@ -228,7 +229,7 @@ Your browser will warn about the certificate because Caddy uses its
 **Always read the root out of the running container — never keep a copy.**
 Caddy generates a new local CA whenever the `caddy_data` volume is recreated
 (`down -v`, a fresh setup, a wiped `DATA_ROOT`), and every generation carries
-the *same* subject name (`Caddy Local Authority - <year> ECC Root`) — only the
+the _same_ subject name (`Caddy Local Authority - <year> ECC Root`) — only the
 validity dates differ. A saved `caddy-root.crt` therefore goes stale without
 looking stale: `curl` fails with `unable to get local issuer certificate`, and
 a keychain entry still shows the expected name while no longer matching. Read
@@ -257,7 +258,7 @@ rm /tmp/caddy-root.crt
 
 `docker-compose.storagebox-sim.yml` runs a throwaway **Samba** container that
 stands in for the Storage Box, so a local `docker compose up` exercises the
-*exact* CIFS mount path production uses — only `SB_HOST` differs. The sim's
+_exact_ CIFS mount path production uses — only `SB_HOST` differs. The sim's
 Samba requires SMB encryption, so it also proves the `seal` path works end to
 end. It's pulled in automatically by the `COMPOSE_FILE` line that
 `scripts/init.sh` writes to `.env`. Confirm the mounts are real CIFS and
@@ -292,17 +293,41 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
   E2EE, create an **encrypted library** (set a library password) — the
   password never leaves your device, so the server only ever stores
   ciphertext. The iOS app prompts for that password to unlock the library.
-- **Photos (iOS):** App Store → *Immich* **or** *Noodle Gallery* → server URL =
+- **Photos (iOS):** App Store → _Immich_ **or** _Noodle Gallery_ → server URL =
   your `https://immich.…`, log in, enable background backup of your camera roll.
   The fork keeps Immich's API, so either app works; the Gallery app is the one
   that exposes the fork-only features.
-- **Vaultwarden (Bitwarden apps):** in any Bitwarden client set *Self-hosted*
+- **Vaultwarden (Bitwarden apps):** in any Bitwarden client set _Self-hosted_
   → Server URL = your `https://vault.…`, then log in. Create the first account
   during initial setup, while the setup overlay has the web vault + signups
   open (see [Local quick start](#local-quick-start)); afterwards Vaultwarden
   is API-only, so daily use is through the Bitwarden extension/apps. Enable
   2FA under Settings → Security → Two-step login (Authenticator app /
   passkey).
+
+## Email (SMTP)
+
+Outgoing mail is **optional and off by default** — an empty `SMTP_HOST`
+disables it and all three apps run fine without it (you just get no invite,
+password-reset or notification mail). One credential in the env file covers the
+stack, but it reaches each app differently, because the images differ:
+
+| App         | How it gets the config                                                                                                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vaultwarden | reads `SMTP_*` **directly** as container env vars (`docker-compose.yml`)                                                                                                                                  |
+| Seafile     | takes **no** env vars for mail — `scripts/harden-seafile.sh` reads the same `SMTP_*` keys and writes Django-style `EMAIL_*` into `conf/seahub_settings.py` (the same mechanism as the hardening settings) |
+| Immich      | **not env-driven** — set SMTP in its web UI under _Administration → Settings → Notifications_; it's stored in Immich's database                                                                           |
+
+Set the keys in `.env` / `.env.production`, then apply:
+
+```bash
+docker compose up -d vaultwarden   # Vaultwarden picks it up on recreate
+./scripts/harden-seafile.sh        # writes EMAIL_* into seahub_settings.py, restarts Seafile
+```
+
+`harden-seafile.sh` reads whichever env file `ENV_FILE` points at (`.env`
+locally, `/root/.env.production` after `source scripts/prod.env`), so the
+password is written down **once**. Re-run it after any `SMTP_*` change
 
 ## Hardening
 
@@ -327,17 +352,17 @@ Per-image status (verified on the live stack — **9 of 10 services run a
 read-only root filesystem**; the one exception (`seafile-server`) is a
 stock-image limitation and keeps every other control):
 
-| Service | Non-root | Read-only rootfs | Notes |
-|---------|----------|------------------|-------|
-| caddy | ✅ **uid 1001** + only `NET_BIND_SERVICE` | ✅ yes | edge proxy; runs non-root (uid 1001, distinct from the uid-1000 apps) and keeps the one cap needed to bind 80/443 (the image's caddy binary carries it as a file capability); `volume-init` chowns its data/config |
-| vaultwarden | ✅ **uid 1000** | ✅ yes | data volume chowned by `volume-init` |
-| immich-db | ✅ process drops to `postgres` | ✅ yes | minimal caps for entrypoint chown + privilege drop |
-| seafile-db | ✅ process drops to `mysql` | ✅ yes | MariaDB; same minimal cap set as the Postgres tier |
-| immich-redis / seafile-redis | ✅ **uid 999** | ✅ yes | ephemeral, password-protected |
-| immich-server | ✅ **uid 1000 (`node`)** | ✅ yes | official image adapted to non-root; upload volume chowned |
-| seafile-server | ⚠️ **daemons uid 8000** (`NON_ROOT`); init/nginx stay root | ❌ no | image regenerates config + runs its own nginx across the rootfs; `volume-init` chowns `/shared` to 8000 |
-| notification-server | ✅ **uid 8000** | ✅ yes | minimal Go websocket sidecar; its CMD is the binary directly (no `my_init`), so it runs non-root with **zero** caps — reads config from env, writes only to the (8000-owned) log volume + `/tmp` |
-| immich-ml | ✅ **uid 1000** | ✅ yes | model cache chowned; `HOME` and gunicorn's control socket moved onto writable mounts (`/cache`, `/tmp`), so nothing needs the rootfs writable |
+| Service                      | Non-root                                                   | Read-only rootfs | Notes                                                                                                                                                                                                              |
+| ---------------------------- | ---------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| caddy                        | ✅ **uid 1001** + only `NET_BIND_SERVICE`                  | ✅ yes           | edge proxy; runs non-root (uid 1001, distinct from the uid-1000 apps) and keeps the one cap needed to bind 80/443 (the image's caddy binary carries it as a file capability); `volume-init` chowns its data/config |
+| vaultwarden                  | ✅ **uid 1000**                                            | ✅ yes           | data volume chowned by `volume-init`                                                                                                                                                                               |
+| immich-db                    | ✅ process drops to `postgres`                             | ✅ yes           | minimal caps for entrypoint chown + privilege drop                                                                                                                                                                 |
+| seafile-db                   | ✅ process drops to `mysql`                                | ✅ yes           | MariaDB; same minimal cap set as the Postgres tier                                                                                                                                                                 |
+| immich-redis / seafile-redis | ✅ **uid 999**                                             | ✅ yes           | ephemeral, password-protected                                                                                                                                                                                      |
+| immich-server                | ✅ **uid 1000 (`node`)**                                   | ✅ yes           | official image adapted to non-root; upload volume chowned                                                                                                                                                          |
+| seafile-server               | ⚠️ **daemons uid 8000** (`NON_ROOT`); init/nginx stay root | ❌ no            | image regenerates config + runs its own nginx across the rootfs; `volume-init` chowns `/shared` to 8000                                                                                                            |
+| notification-server          | ✅ **uid 8000**                                            | ✅ yes           | minimal Go websocket sidecar; its CMD is the binary directly (no `my_init`), so it runs non-root with **zero** caps — reads config from env, writes only to the (8000-owned) log volume + `/tmp`                   |
+| immich-ml                    | ✅ **uid 1000**                                            | ✅ yes           | model cache chowned; `HOME` and gunicorn's control socket moved onto writable mounts (`/cache`, `/tmp`), so nothing needs the rootfs writable                                                                      |
 
 The one remaining ❌ service (`seafile-server`) still runs with `cap_drop: ALL`,
 `no-new-privileges`, pinned images, a `pids_limit`, and no published ports —
@@ -363,15 +388,15 @@ on.
 On top of the container controls, Immich runs with these application-level
 settings (all on `immich-server`):
 
-| Setting | Effect |
-|---------|--------|
-| `IMMICH_VERSION` pinned | server + machine-learning don't float a moving tag; bump deliberately |
+| Setting                                  | Effect                                                                                                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IMMICH_VERSION` pinned                  | server + machine-learning don't float a moving tag; bump deliberately                                                                         |
 | `IMMICH_TRUSTED_PROXIES=${PROXY_SUBNET}` | Immich reads the real client IP from Caddy's `X-Forwarded-For`, so the login rate-limiter and audit logs see the client rather than the proxy |
 
-Immich's `/api/auth/admin-sign-up` endpoint only ever creates the *first*
+Immich's `/api/auth/admin-sign-up` endpoint only ever creates the _first_
 admin and is rejected once one exists, so it closes itself after you register.
 The Immich **system settings** (version-check, machine learning, sharing,
-etc.) are deliberately *not* pinned via `IMMICH_CONFIG_FILE` — they stay
+etc.) are deliberately _not_ pinned via `IMMICH_CONFIG_FILE` — they stay
 editable in the admin UI; harden them there if you want.
 
 ## Photos: why the Gallery fork
@@ -394,7 +419,7 @@ limits](#resource-limits-fits-a-4-gb-host).
 The stack is tuned to run on a **4 GB** machine (e.g. a Hetzner **CX22**).
 Every long-running service has a `mem_limit` (a hard ceiling, not a
 reservation) so no single service can balloon and OOM the host. Steady-state
-usage is **≈ 1.3–1.4 GB**; the ceilings deliberately *over-subscribe* (they sum
+usage is **≈ 1.3–1.4 GB**; the ceilings deliberately _over-subscribe_ (they sum
 to ~5.1 GB) because they are not all hit at once — the largest spike, the
 reverse-geocoding import, lands while the ML model is still idle. A small swap
 file catches rare concurrent spikes (an OOM kill becomes a slowdown);
@@ -403,21 +428,21 @@ file catches rare concurrent spikes (an OOM kill becomes a slowdown);
 **The geodata import is the sizing constraint.** It re-runs on any version bump
 that ships a new `cities500` dataset — not just first boot — and it spikes
 `immich-server`, not only `immich-db`. Given too little memory the import is
-OOM-killed *before it finishes*, so the container restarts and re-imports
+OOM-killed _before it finishes_, so the container restarts and re-imports
 forever. The loop is easy to misread, because each cycle logs a complete,
 healthy-looking boot ("Immich Server is listening") right before dying; the only
 direct evidence is `docker events` showing `oom` / `die exit=137`, or
 `memory.peak` in the container's cgroup. Hence the 2048M ceiling below.
 
-| Service | `mem_limit` | Tuning |
-|---------|-------------|--------|
-| immich-server | 2048M | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap) |
-| immich-ml | 1024M | idle-model unload (`MODEL_TTL=300`), 1 worker, serialized inference |
-| seafile-server | 640M | seahub gunicorn workers 5→2 (`scripts/harden-seafile.sh`) |
-| immich-db | 768M | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM. 768M (not 512M) clears the one-time first-boot reverse-geocoding import, which peaks ~680M |
-| seafile-db | 160M | MariaDB `innodb_buffer_pool=96M`, `performance_schema=OFF` |
-| notification-server | 64M | lightweight Go websocket sidecar for real-time push; idles at ~3M, so the ceiling is pure headroom |
-| caddy / vaultwarden / immich-redis / seafile-redis | 96M each | seafile-redis is a pure cache (`maxmemory 48M` + LRU); immich-redis is the BullMQ job broker, so it is **not** evicted |
+| Service                                            | `mem_limit` | Tuning                                                                                                                                                                                                                       |
+| -------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| immich-server                                      | 2048M       | `NODE_OPTIONS=--max-old-space-size=768` (GC under the cap)                                                                                                                                                                   |
+| immich-ml                                          | 1024M       | idle-model unload (`MODEL_TTL=300`), 1 worker, serialized inference                                                                                                                                                          |
+| seafile-server                                     | 640M        | seahub gunicorn workers 5→2 (`scripts/harden-seafile.sh`)                                                                                                                                                                    |
+| immich-db                                          | 768M        | `shared_buffers=128M`, `effective_cache_size=384M`, `max_connections=30` — pinned so Postgres does **not** auto-tune to host RAM. 768M (not 512M) clears the one-time first-boot reverse-geocoding import, which peaks ~680M |
+| seafile-db                                         | 160M        | MariaDB `innodb_buffer_pool=96M`, `performance_schema=OFF`                                                                                                                                                                   |
+| notification-server                                | 64M         | lightweight Go websocket sidecar for real-time push; idles at ~3M, so the ceiling is pure headroom                                                                                                                           |
+| caddy / vaultwarden / immich-redis / seafile-redis | 96M each    | seafile-redis is a pure cache (`maxmemory 48M` + LRU); immich-redis is the BullMQ job broker, so it is **not** evicted                                                                                                       |
 
 > **immich-db note:** the memory flags are layered on top of the image's
 > default `-c config_file=/etc/postgresql/postgresql.conf` (kept in
@@ -450,11 +475,11 @@ To give a >4 GB host more cache, raise the `immich-db` `shared_buffers` /
 Secrets are split into two files by lifecycle, so the credentials Compose loads
 into the running stack on every `up` never include human-account passwords:
 
-| | **Runtime** secrets | **Setup-only** secrets |
-|---|---|---|
-| File (local / prod) | `.env` / `/root/.env.production` | `.env.setup` / `/root/.env.production.setup` |
-| Loaded by | Compose, on **every** `up` | only `init.sh`, `verify.sh`, and the **first** `up` |
-| Contents | DB / Redis passwords, `SEAFILE_JWT_KEY`, `SB_PASSWORD`, `VAULTWARDEN_ADMIN_TOKEN` — machine creds the long-running containers read continuously | `SEAFILE_ADMIN_*` — used once to seed the first Seafile admin, then only to log in / run `verify.sh` (Immich + Vaultwarden admins are registered in the browser, so they have no entry) |
+|                     | **Runtime** secrets                                                                                                                             | **Setup-only** secrets                                                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| File (local / prod) | `.env` / `/root/.env.production`                                                                                                                | `.env.setup` / `/root/.env.production.setup`                                                                                                                                            |
+| Loaded by           | Compose, on **every** `up`                                                                                                                      | only `init.sh`, `verify.sh`, and the **first** `up`                                                                                                                                     |
+| Contents            | DB / Redis passwords, `SEAFILE_JWT_KEY`, `SB_PASSWORD`, `VAULTWARDEN_ADMIN_TOKEN` — machine creds the long-running containers read continuously | `SEAFILE_ADMIN_*` — used once to seed the first Seafile admin, then only to log in / run `verify.sh` (Immich + Vaultwarden admins are registered in the browser, so they have no entry) |
 
 `scripts/init.sh` generates both (each `chmod 600`, both gitignored). The setup
 file is **not** referenced by the base `docker-compose.yml`, so a normal
@@ -479,7 +504,7 @@ credentials.
 > too), the env file is already `chmod 600` and outside the deploy dir, and
 > several secrets can't be file-mounted anyway (Redis takes its password as a
 > CLI arg, `SB_PASSWORD` lives in the CIFS volume options, the Seafile image
-> is env-only). The worthwhile win was getting the *setup* secrets out of the
+> is env-only). The worthwhile win was getting the _setup_ secrets out of the
 > runtime container env, above.
 
 ## Operations
@@ -505,7 +530,7 @@ and `/root/.env.production` + `/root/.env.production.setup` (server, outside
 the deploy dir); back them up securely and separately. See
 [Secrets: setup vs runtime](#secrets-setup-vs-runtime).
 
-**Automated backup (`scripts/backup.sh`):** writes *consistent* dumps of the
+**Automated backup (`scripts/backup.sh`):** writes _consistent_ dumps of the
 attached-volume state to `backup/backups/` on the Storage Box — `pg_dump`
 (Immich), `mariadb-dump --single-transaction` of all three Seafile DBs, a
 SQLite `.backup` of Vaultwarden plus its data folder, and Caddy's TLS material.
