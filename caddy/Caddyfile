@@ -3,8 +3,26 @@
 #   CADDY_TLS=internal         -> Caddy's built-in CA (self-signed), local tests
 #   CADDY_TLS=you@example.com  -> automatic Let's Encrypt for real domains
 #
+# With CADDY_TLS=internal, never keep a copy of the root certificate. Caddy
+# generates a new local CA whenever the caddy_data volume is recreated (down -v,
+# a fresh setup, a wiped DATA_ROOT), and every generation carries the SAME subject
+# name ("Caddy Local Authority - <year> ECC Root") — only the validity dates
+# differ. A saved root therefore goes stale without looking stale: curl fails with
+# "unable to get local issuer certificate" while the keychain entry still shows
+# the expected name. Read it out of the running container instead (see README
+# "Local quick start"); scripts/verify.sh sidesteps it with curl -k.
+#
+# This file is bind-mounted :ro, so `docker compose up -d` does NOT pick up edits.
+# Apply them with `docker compose exec caddy caddy reload --config
+# /etc/caddy/Caddyfile` or a force-recreate of the container.
+#
 # Domains come from the environment (SEAFILE_DOMAIN / IMMICH_DOMAIN /
 # VAULTWARDEN_DOMAIN), so this file never changes between deployments.
+#
+# Public certs are issued over the HTTP challenge, which needs inbound :80. For a
+# DNS challenge instead (wildcard certs, or no inbound :80), build a Caddy image
+# with your provider's DNS module and replace `tls {$CADDY_TLS}` below with a
+# `tls { dns <provider> ... }` block.
 #
 # No trusted_proxies: as the edge, Caddy ignores any client-sent X-Forwarded-For
 # and forwards the real peer, so a forged XFF can't poison Immich's / Vaultwarden's

@@ -9,7 +9,17 @@
 # the capabilities an image genuinely needs), pinned images, internal networks
 # for databases, and a single ingress (only Caddy publishes host ports).
 # read_only root filesystem + tmpfs is applied wherever the upstream image
-# tolerates it; see README "Hardening" for the per-image status.
+# tolerates it — every service here except seafile-server, whose stock image
+# regenerates config and runs its own nginx across the rootfs. The per-service
+# comments below say why each exception, capability and tmpfs flag is there.
+#
+# Memory budget (a 4 GB host): every long-running service has a mem_limit, a hard
+# ceiling rather than a reservation. Steady state is ~1.3-1.4 GB; the ceilings sum
+# to ~5.1 GB on purpose, because the peaks don't coincide — the biggest one, the
+# Immich geodata import, lands while the ML model is still idle. prod-setup.sh
+# adds a swap file so a rare overlap becomes a slowdown instead of an OOM kill.
+# To use a bigger host, raise the immich-db cache settings and the mem_limits
+# proportionally.
 
 name: private-cloud
 
@@ -54,8 +64,11 @@ volumes:
   # NOT touched by volume-init. nobrl avoids CIFS byte-range-lock errors; the
   # databases live on local SSD precisely so they never need locking over SMB.
   # seal turns on SMB3 transport encryption, so blobs travel host<->box as
-  # ciphertext on the wire (requires vers>=3.0; it does NOT encrypt data at rest
-  # on the box — snapshots still hold plaintext. See README "Storage layout").
+  # ciphertext on the wire (requires vers>=3.0, hence SB_SMB_VERS). It is set on
+  # every mount of this share — the two volumes here plus the host mounts in
+  # prod-setup.sh / backup.sh / restore.sh. Transport only: data lands on the box
+  # in plaintext, so snapshots hold plaintext and a restore needs no key. For
+  # at-rest encryption use a Seafile encrypted library (client-side E2EE).
   # noexec,nosuid,nodev: both shares hold only blobs, config and avatars, never
   # executables. Like any driver_opts change, applying these needs a `docker volume
   # rm` + recreate.
@@ -284,6 +297,9 @@ services:
       # The immich postgres image writes a tuned config here on every start.
       - /etc/postgresql:noexec,nosuid,nodev
     cap_drop: [ALL]
+    # The entrypoint starts as root to chown the data dir, then drops to the
+    # postgres user — CHOWN/DAC_OVERRIDE/FOWNER for the first, SETGID/SETUID for
+    # the second. Nothing else is granted.
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt:
       - no-new-privileges:true
@@ -341,9 +357,10 @@ services:
     # (227k records, re-runs whenever the bundled cities500 dataset changes) peaks
     # at ~1.5G. Under a 1024m cap that import is OOM-killed before it finishes, so
     # the container restarts and re-imports forever — a crash loop that still logs
-    # a full, healthy-looking boot each cycle. The spike is off-heap, so the V8 cap
-    # below stays at 768M. mem_limit is a ceiling, not a reservation: this costs
-    # nothing at rest.
+    # a full, healthy-looking boot each cycle, so the only direct evidence is
+    # `docker events` (oom / die exit=137) or memory.peak in the container cgroup.
+    # The spike is off-heap, so the V8 cap below stays at 768M. mem_limit is a
+    # ceiling, not a reservation: this costs nothing at rest.
     mem_limit: 2048m
     cpus: "1.5"
     user: "1000:1000"
@@ -457,8 +474,8 @@ services:
   # ---------------------------------------------------------------- seafile --
   # Reliable file sync with client-side encrypted libraries (the E2EE that
   # actually works on iOS). MariaDB + Redis are fully hardened like the other
-  # data tiers; the Seafile app image keeps init/nginx as root (see "Hardening"
-  # in the README) but runs the seaf-server/seahub daemons non-root via NON_ROOT.
+  # data tiers; the Seafile app image keeps init/nginx as root but runs the
+  # seaf-server/seahub daemons non-root via NON_ROOT.
   seafile-db:
     image: ${SEAFILE_DB_IMAGE}
     container_name: pc-seafile-db
@@ -488,6 +505,7 @@ services:
       - /tmp:noexec,nosuid,nodev
       - /run/mysqld:noexec,nosuid,nodev
     cap_drop: [ALL]
+    # Same minimal set as the Postgres tier: entrypoint chown, then drop to mysql.
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt:
       - no-new-privileges:true
@@ -545,6 +563,8 @@ services:
     image: ${SEAFILE_IMAGE}
     container_name: pc-seafile
     restart: *restart
+    # Fits the stack's budget only with seahub cut from 5 gunicorn workers to 2
+    # (~430 MB) — scripts/harden-seafile.sh does that after a fresh setup.
     mem_limit: 640m
     # Fork-bomb cap. Steady state is ~two dozen processes (my_init, nginx, seaf-server,
     # 2 seahub gunicorn workers, go-fileserver).
@@ -629,6 +649,7 @@ services:
     image: ${NOTIFICATION_SERVER_IMAGE}
     container_name: pc-notification
     restart: *restart
+    # Idles at ~3M; the ceiling is headroom, not a target.
     mem_limit: 64m
     pids_limit: 128
     environment:
@@ -652,7 +673,9 @@ services:
         condition: service_healthy
       seafile-server:
         condition: service_healthy
-    # Runs as uid 8000 (owns the log dir) with a read-only rootfs and no added caps.
+    # Unlike seafile-server, this image's CMD is the Go binary itself (no my_init),
+    # so it runs as uid 8000 (owns the log dir) with a read-only rootfs and zero
+    # caps: config comes from env, the only writes are the log volume and /tmp.
     user: "8000:8000"
     read_only: true
     cap_drop: [ALL]
