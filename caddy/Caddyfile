@@ -6,11 +6,10 @@
 # With CADDY_TLS=internal, never keep a copy of the root certificate. Caddy
 # generates a new local CA whenever the caddy_data volume is recreated (down -v,
 # a fresh setup, a wiped DATA_ROOT), and every generation carries the SAME subject
-# name ("Caddy Local Authority - <year> ECC Root") — only the validity dates
-# differ. A saved root therefore goes stale without looking stale: curl fails with
-# "unable to get local issuer certificate" while the keychain entry still shows
-# the expected name. Read it out of the running container instead (see README
-# "Local quick start"); scripts/verify.sh sidesteps it with curl -k.
+# name ("Caddy Local Authority - <year> ECC Root"), so a saved root goes stale
+# without looking stale: curl fails with "unable to get local issuer certificate"
+# while the keychain entry still shows the expected name. Read it out of the
+# running container instead (see README "Local quick start"); verify.sh uses -k.
 #
 # This file is bind-mounted :ro, so `docker compose up -d` does NOT pick up edits.
 # Apply them with `docker compose exec caddy caddy reload --config

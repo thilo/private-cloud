@@ -14,30 +14,31 @@ Self-hosted replacements for the usual cloud subscriptions, in one
 behind a single **Caddy** reverse proxy with automatic HTTPS. The same base
 compose file runs locally and on a real server.
 
+Configuration decisions are documented where they take effect — in the compose
+files, the `Caddyfile`, the env templates and the scripts. This README covers
+what the stack does and how to run it.
 
 ## What this stack focuses on
 
-- **Low running cost.** Sized for a **4 GB VPS** (hard memory cap on every
-  service); the bulk photo/file blobs go on a CIFS share — a Hetzner
-  **Storage Box** costs ≈ €3.20/TB vs ≈ €50/TB for block volumes. Databases
-  and hot caches stay on local SSD. A 1 TB setup runs under €10/month.
-- **Hardened containers.** `cap_drop: ALL`, `no-new-privileges`, and pinned
-  images on every service; 9 of 10 services run a **read-only root
-  filesystem**, most non-root. Databases sit on egress-blocked internal
-  networks, only Caddy publishes host ports, and admin passwords are kept out
-  of the runtime container environment.
-- **Acceptance tests against the real client APIs.** `./scripts/verify.sh`
-  exercises each app end-to-end over HTTPS through the same endpoints the
-  official clients use — including a small Bitwarden crypto client that
-  registers an account, stores an encrypted secret, decrypts it back, and
-  enables 2FA.
+- **Low running cost.** Sized for a **4 GB VPS**; the bulk photo/file blobs go
+  on a CIFS share — a Hetzner **Storage Box** costs ≈ €3.20/TB vs ≈ €50/TB for
+  block volumes — while databases and hot caches stay on local SSD. A 1 TB
+  setup runs under €10/month.
+- **Hardened containers.** `cap_drop: ALL`, `no-new-privileges` and pinned
+  images everywhere; 9 of 10 services run a **read-only root filesystem**, most
+  non-root. Databases sit on egress-blocked internal networks, only Caddy
+  publishes host ports, and admin passwords stay out of the runtime container
+  environment.
+- **Acceptance tests against the real client APIs.** `./scripts/verify.sh` hits
+  the same endpoints the official clients use — including a small Bitwarden
+  crypto client that registers an account, stores an encrypted secret, decrypts
+  it back and enables 2FA.
 - **The production storage path is testable locally.** A throwaway Samba
-  container stands in for the Storage Box, so a local `docker compose up`
-  exercises the same CIFS mount path as production, SMB3 transport encryption
-  included.
-- **Scripted operations.** Daily consistent backups with a `--check` mode
-  that verifies the backup is restorable, a watchdog that recovers a wedged
-  CIFS mount, and a scripted restore path.
+  container stands in for the Storage Box, so `docker compose up` exercises the
+  same CIFS mount path as production, transport encryption included.
+- **Scripted operations.** Daily consistent backups with a `--check` mode that
+  proves them restorable, a watchdog that recovers a wedged CIFS mount, and a
+  scripted restore.
 
 ```
                          ┌───────── Caddy (auto-HTTPS, only ingress) ─────────┐
@@ -52,20 +53,20 @@ compose file runs locally and on a real server.
 ## Production deployment
 
 You need: a Linux host with Docker + Compose (**4 GB RAM is enough**), a CIFS
-share for the bulk storage (e.g. a Hetzner **Storage Box** with Samba/CIFS
-support enabled, in the **same location** as the server — traffic between them
-is free), and a domain with three names you can point at the server.
+share for the bulk storage (e.g. a Hetzner **Storage Box** with SMB enabled, in
+the **same location** as the server — traffic between them is free), and a
+domain with three names you can point at the server.
 
-Production uses a **separate env file** (`.env.production`) and a small
-**compose overlay** (`docker-compose.production.yml`) that pins the
-latency-sensitive volumes onto an **attached block volume** (e.g. a Hetzner
-Volume) while the bulk blobs go to the Storage Box. The base
-`docker-compose.yml` is unchanged between local and production.
+Production adds a **separate env file** (`.env.production`) and a small
+**overlay** (`docker-compose.production.yml`) that pins the latency-sensitive
+volumes onto an **attached block volume**, while the bulk blobs go to the
+Storage Box. The base `docker-compose.yml` is unchanged between local and
+production.
 
 **1. Configure.** Generate `.env.production` (runtime secrets) **and**
-`.env.production.setup` (the initial admin accounts), then set your domains,
-the Let's Encrypt email, the Storage Box credentials (`SB_HOST` / `SB_USER` /
-`SB_PASSWORD`), and `DATA_ROOT` (a directory on the attached volume):
+`.env.production.setup` (the initial admin accounts), then fill in your domains,
+the Let's Encrypt email, the Storage Box credentials and `DATA_ROOT` (a
+directory on the attached volume):
 
 ```bash
 ENV_FILE=.env.production EXAMPLE=.env.production.example GEN_SB_PASSWORD=0 \
@@ -74,45 +75,44 @@ $EDITOR .env.production          # set domains, CADDY_TLS, SB_*, DATA_ROOT
 $EDITOR .env.production.setup    # set the admin email(s) to your real address
 ```
 
-Then copy **both** to the server **outside the deploy directory** so rsync
-updates never touch or expose them:
+Copy **both** to the server **outside the deploy directory**, so a re-deploy
+never touches or exposes them:
 
 ```bash
 scp .env.production .env.production.setup root@<server>:/root/
 ssh root@<server> 'chmod 600 /root/.env.production /root/.env.production.setup'
 ```
 
-`.env.production.setup` is **setup-only** — Compose does not load it at
-runtime. See [Secrets: setup vs runtime](#secrets-setup-vs-runtime).
-
-The `prod.env` switch points every later command at production (base + overlay
-+ `/root/.env.production`):
+`.env.production.setup` is **setup-only** — Compose does not load it at runtime
+(see [Secrets: setup vs runtime](#secrets-setup-vs-runtime)). One `source`
+points every later command at production:
 
 ```bash
 source scripts/prod.env          # sets COMPOSE_FILE / COMPOSE_ENV_FILES / ENV_FILE
 ```
 
 **2. DNS.** Point each name at the server's public IP with an **A record**
-(AAAA too if the host has IPv6). Caddy then obtains/renews Let's Encrypt certs
-automatically. Deploy before DNS is ready by setting `CADDY_TLS=internal`, then
-flip it to your email and `docker compose up -d caddy` once records resolve.
+(AAAA too if the host has IPv6); Caddy then obtains and renews Let's Encrypt
+certs automatically. To deploy before DNS is ready, set `CADDY_TLS=internal`,
+then flip it to your email and `docker compose up -d caddy` once records
+resolve.
 
-**3. Ports / firewall.** Expose TCP **80 and 443** only. Port 80 is needed for
-the Let's Encrypt HTTP challenge and HTTP→HTTPS redirects. The databases have no
-published ports.
+**3. Ports / firewall.** Expose TCP **80 and 443** only — port 80 for the Let's
+Encrypt HTTP challenge and the HTTP→HTTPS redirect. Nothing else publishes
+ports.
 
-**4. Prepare the host.** One idempotent script installs the host packages the
-backups and the CIFS mount need, adds swap, creates the data directories and
-Storage Box folders, and installs the `systemd` timers for the daily backup and
-the mount watchdog:
+**4. Prepare the host.** One idempotent script installs the packages the backups
+and the CIFS mount need, adds swap, creates the data directories and Storage Box
+folders, and installs the `systemd` timers for the daily backup and the mount
+watchdog:
 
 ```bash
 sudo -E ./scripts/prod-setup.sh
 ```
 
 **5. Bring it up.** The **first** `up` adds the setup overlay + setup env file
-to seed the Seafile admin (and open Vaultwarden signups for first
-registration); every later `up` omits both:
+to seed the Seafile admin and open Vaultwarden signups; every later `up` omits
+both:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.production.yml \
@@ -125,13 +125,13 @@ docker compose -f docker-compose.yml -f docker-compose.production.yml \
 # Day-to-day afterwards (prod.env already sourced):  docker compose up -d
 ```
 
-How the first Immich and Vaultwarden accounts work is described under
-[Local quick start](#local-quick-start) — the flow is identical in production.
+The first Immich and Vaultwarden accounts work exactly as under
+[Local quick start](#local-quick-start).
 
 ## Storage layout
 
-The big, cold blobs go on the CIFS/SMB share; the databases and the hot caches
-stay on the server's local SSD.
+The big, cold blobs go on the CIFS/SMB share; databases and hot caches stay on
+the server's local SSD.
 
 > **Never put a database on the Storage Box.** Postgres / MariaDB / SQLite need
 > low-latency POSIX locking that SMB cannot provide; they will corrupt or crawl.
@@ -149,18 +149,16 @@ Seafile's real metadata — libraries, users, the file tree — lives in **Maria
 and stays local; only the object store and config sit on the box.
 
 The SMB3 connection uses **transport encryption**, so all host↔box traffic is
-encrypted on the wire. It is **transport-only**: blobs land on the box in
+encrypted on the wire. That is transport-only: blobs land on the box in
 plaintext, so snapshots hold plaintext and a restore needs no key. For
-encryption at rest use a Seafile **encrypted library** (true client-side E2EE)
-or encrypt above the mount.
-
-The exact mount options and the reasoning behind each one are in the `volumes:`
-block of [docker-compose.yml](docker-compose.yml).
+encryption at rest, use a Seafile **encrypted library** (true client-side E2EE)
+or encrypt above the mount. The mount options and the reasoning behind each are
+in the `volumes:` block of [docker-compose.yml](docker-compose.yml).
 
 ## Local quick start
 
-Requirements: Docker + Docker Compose, `node` and `python3` on the host (for
-the verification scripts), outbound internet.
+Requirements: Docker + Docker Compose, `node` and `python3` on the host (for the
+verification scripts), outbound internet.
 
 ```bash
 ./scripts/init.sh          # generate .env (runtime) + .env.setup (Seafile admin), run once
@@ -177,10 +175,10 @@ docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \
 # Day-to-day afterwards is just:  docker compose up -d
 ```
 
-The initial Seafile admin password is a **setup-only** secret and lives in a
-separate `.env.setup` (not loaded at runtime) — see
-[Secrets: setup vs runtime](#secrets-setup-vs-runtime). Immich and Vaultwarden
-have no stored admin password: register their first accounts in the browser.
+The initial Seafile admin password is a **setup-only** secret in `.env.setup`,
+which is not loaded at runtime (see
+[Secrets: setup vs runtime](#secrets-setup-vs-runtime)). Immich and Vaultwarden
+store no admin password at all — register their first accounts in the browser.
 
 Local URLs (the `*.127.0.0.1.nip.io` names resolve to `127.0.0.1`
 automatically):
@@ -191,29 +189,26 @@ automatically):
 | Immich      | https://immich.127.0.0.1.nip.io:8443  | register the first account — see below |
 | Vaultwarden | https://vault.127.0.0.1.nip.io:8443   | register the first account — see below |
 
-**First Immich account.** Immich's admin-sign-up page is open until the first
-admin exists, then closes itself — no setup toggle needed. While the stack is
-up, open the Immich URL and create your admin in the browser (nothing is
-stored on disk). `verify.sh` checks whether that admin exists yet: if not, it
-skips the photo test with a hint; if so, it prompts for the admin email +
-password.
+**First Immich account.** The admin-sign-up page is open until the first admin
+exists, then closes itself — no toggle needed. Open the Immich URL while the
+stack is up and create your admin in the browser; nothing is stored on disk.
+`verify.sh` skips the photo test with a hint if that admin doesn't exist yet,
+and prompts for its email + password if it does.
 
-**First Vaultwarden account.** At runtime Vaultwarden is hardened to
-**API-only**: signups closed, admin panel off, and the browser web vault
-disabled (the URL 404s). The setup overlay turns the web vault + signups back
-on for the first `up`: while the stack is running from that first-time command
-above, open the Vaultwarden URL and register your account. The next plain
-`docker compose up -d` returns it to API-only automatically. Daily use is
-through a **Bitwarden browser extension or app** pointed at the same server
-URL. (`verify.sh` registers through its own short-lived API toggle and cleans
-up after itself.)
+**First Vaultwarden account.** At runtime Vaultwarden is **API-only**: signups
+closed, admin panel off, browser web vault disabled (the URL 404s). The setup
+overlay turns the web vault and signups back on for the first `up` — register
+your account then; the next plain `docker compose up -d` restores API-only.
+Daily use is through a **Bitwarden browser extension or app** pointed at the
+same server URL. (`verify.sh` uses its own short-lived toggle and cleans up
+after itself.)
 
-Your browser will warn about the certificate because Caddy uses its **internal
-CA** locally. Either accept the warning, or trust the root — but **always read
-the root out of the running container instead of keeping a copy**, because Caddy
-silently generates a new CA whenever the `caddy_data` volume is recreated (the
-[Caddyfile](caddy/Caddyfile) header explains how a saved copy goes stale without
-looking stale):
+Locally, Caddy serves its **internal CA**, so browsers warn about the
+certificate. Accept the warning, or trust the root — but **read the root out of
+the running container rather than keeping a copy**: Caddy silently generates a
+new CA whenever the `caddy_data` volume is recreated, and the
+[Caddyfile](caddy/Caddyfile) header explains how a saved copy then goes stale
+without looking stale.
 
 ```bash
 # curl: read the CA live, no file on disk
@@ -222,7 +217,7 @@ curl --cacert <(docker compose exec -T caddy cat /data/caddy/pki/authorities/loc
 ```
 
 To trust it in the **macOS** system keychain, use a temp file and delete it
-again. Re-run this after any CA regeneration; `add-trusted-cert` replaces the
+again. Re-run after any CA regeneration; `add-trusted-cert` replaces the
 previous entry for the same certificate:
 
 ```bash
@@ -234,13 +229,12 @@ rm /tmp/caddy-root.crt
 
 ### The Storage Box simulator
 
-`docker-compose.storagebox-sim.yml` runs a throwaway **Samba** container that
-stands in for the Storage Box, so a local `docker compose up` exercises the
-_exact_ CIFS mount path production uses — only `SB_HOST` differs. The sim's
-Samba requires SMB encryption, so it also proves the encrypted-transport path
-works end to end. It is pulled in automatically by the `COMPOSE_FILE` line that
-`scripts/init.sh` writes to `.env`. Confirm the mounts are real CIFS and
-encrypted:
+`docker-compose.storagebox-sim.yml` runs a throwaway **Samba** container in
+place of the Storage Box, so a local `docker compose up` exercises the _exact_
+CIFS mount path production uses — only `SB_HOST` differs. Its Samba requires SMB
+encryption, so the local run also proves the encrypted-transport path. It is
+pulled in automatically by the `COMPOSE_FILE` line `scripts/init.sh` writes to
+`.env`. Confirm the mounts are real CIFS and encrypted:
 
 ```bash
 docker exec pc-immich-server mount | grep ' /data '
@@ -251,41 +245,35 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
 
 `./scripts/verify.sh` exercises each app over HTTPS through Caddy:
 
-1. **Vaultwarden** – `scripts/vw-test.mjs` is a tiny Bitwarden client (pure
-   Node crypto: PBKDF2 / AES-CBC+HMAC / RSA): it registers an account, stores
-   an encrypted login item, reads it back and decrypts it, and enables TOTP
-   2FA.
-2. **Immich** – logs in as the admin and uploads a photo through
-   `POST /api/assets` (the exact endpoint the iOS app uses), then fetches the
-   asset back.
+1. **Vaultwarden** – `scripts/vw-test.mjs` is a tiny Bitwarden client (pure Node
+   crypto: PBKDF2 / AES-CBC+HMAC / RSA): it registers an account, stores an
+   encrypted login item, reads it back and decrypts it, and enables TOTP 2FA.
+2. **Immich** – logs in as the admin, uploads a photo through `POST /api/assets`
+   (the endpoint the iOS app uses), then fetches the asset back.
 3. **Seafile** – logs in via the token API, creates a library, uploads a file
-   and reads back identical bytes (the same Web API the desktop/iOS clients
-   use). Encrypted libraries (the client-side E2EE) are created in the app,
-   not the API.
+   and reads back identical bytes (the Web API the desktop/iOS clients use).
+   Encrypted libraries are created in the app, not the API.
 
 ## Connecting the real clients
 
-- **Seafile (iOS / desktop):** App Store / desktop client → server URL = your
-  `https://seafile.…`, log in as `admin@example.com` (see `.env.setup`). For
-  E2EE, create an **encrypted library** (set a library password) — the
-  password never leaves your device, so the server only ever stores
-  ciphertext. The iOS app prompts for that password to unlock the library.
+- **Seafile (iOS / desktop):** server URL = your `https://seafile.…`, log in as
+  `admin@example.com` (see `.env.setup`). For E2EE, create an **encrypted
+  library** and set a library password — it never leaves your device, so the
+  server only ever stores ciphertext. The iOS app prompts for it to unlock.
 - **Photos (iOS):** App Store → _Immich_ **or** _Noodle Gallery_ → server URL =
   your `https://immich.…`, log in, enable background backup of your camera roll.
   The fork keeps Immich's API, so either app works; the Gallery app is the one
   that exposes the fork-only features.
-- **Vaultwarden (Bitwarden apps):** in any Bitwarden client set _Self-hosted_
-  → Server URL = your `https://vault.…`, then log in. Create the first account
-  during initial setup, while the setup overlay has the web vault + signups
-  open (see [Local quick start](#local-quick-start)); afterwards Vaultwarden
-  is API-only, so daily use is through the Bitwarden extension/apps. Enable
-  2FA under Settings → Security → Two-step login (Authenticator app /
-  passkey).
+- **Vaultwarden (Bitwarden apps):** in any Bitwarden client set _Self-hosted_ →
+  Server URL = your `https://vault.…`, then log in. The first account is
+  registered during setup (see [Local quick start](#local-quick-start));
+  afterwards Vaultwarden is API-only, so daily use is through the extension or
+  apps. Enable 2FA under Settings → Security → Two-step login.
 
 ## Email (SMTP)
 
-Outgoing mail is **optional and off by default** — an empty `SMTP_HOST`
-disables it and all three apps run fine without it (you just get no invite,
+Outgoing mail is **optional and off by default** — an empty `SMTP_HOST` disables
+it and all three apps run fine without it (you just get no invite,
 password-reset or notification mail). One credential in the env file covers the
 stack, but it reaches each app differently, because the images differ:
 
@@ -302,26 +290,22 @@ docker compose up -d vaultwarden   # Vaultwarden picks it up on recreate
 ./scripts/harden-seafile.sh        # writes the mail settings into Seahub, restarts Seafile
 ```
 
-`harden-seafile.sh` reads whichever env file `ENV_FILE` points at (`.env`
-locally, `/root/.env.production` after `source scripts/prod.env`), so the
+`harden-seafile.sh` reads whichever env file `ENV_FILE` points at, so the
 password is written down **once**. Re-run it after any `SMTP_*` change.
 
 ## Hardening
 
-Applied to every service: `security_opt: no-new-privileges`, `cap_drop: ALL`
-(plus only the capabilities an image genuinely needs), pinned images, databases
-on egress-blocked `internal:` networks, and a single ingress (only Caddy
-publishes ports). The unauthenticated immich-ml API sits on its own network
-reachable only from immich-server. A **read-only root filesystem** + `tmpfs` for
-scratch is the mechanism that satisfies "remove dev tools / package managers":
-even though the stock images still contain `apt`/`apk`, an attacker cannot
-install or persist anything on a read-only, capability-stripped,
-no-new-privileges container — and the scratch mounts themselves are `nosuid`,
-`nodev` and (wherever the image tolerates it) `noexec`.
+Every service: `no-new-privileges`, `cap_drop: ALL` plus only the capabilities
+its image genuinely needs, a pinned image, and no published ports except
+Caddy's. Databases sit on egress-blocked `internal:` networks; the
+unauthenticated immich-ml API is on its own network, reachable only from
+immich-server. The **read-only root filesystem** + `tmpfs` scratch is what
+satisfies "remove dev tools / package managers": the stock images still ship
+`apt`/`apk`, but nothing can be installed or persisted on a read-only,
+capability-stripped, no-new-privileges container. Scratch mounts are `nosuid`,
+`nodev` and — wherever the image tolerates it — `noexec`.
 
-Verified on the live stack — **9 of 10 services run a read-only root
-filesystem**; the one exception is a stock-image limitation and keeps every
-other control:
+Verified on the live stack:
 
 | Service                      | Non-root                                                   | Read-only rootfs |
 | ---------------------------- | ---------------------------------------------------------- | ---------------- |
@@ -335,68 +319,57 @@ other control:
 | notification-server          | ✅ uid 8000, zero capabilities                             | ✅ yes           |
 | immich-ml                    | ✅ uid 1000                                                | ✅ yes           |
 
-`seafile-server` still runs with `cap_drop: ALL`, `no-new-privileges`, pinned
-images, a `pids_limit`, and no published ports — only its read-only rootfs is
-relaxed, because the stock image regenerates config and runs its own nginx
-across the filesystem.
+`seafile-server` is the one exception, and a stock-image limitation: the image
+regenerates config and runs its own nginx across the filesystem. It keeps every
+other control and drops its data daemons to a non-root uid.
 
-At the ingress, Caddy applies a shared security-header snippet to **all three**
-sites (HSTS, `nosniff`, a `Referrer-Policy` that keeps share-link tokens from
-leaking to third parties, and the `Server` header stripped) and, as the edge,
-ignores any client-supplied `X-Forwarded-For` — so a forged header cannot poison
-the per-client login limiters in Immich and Vaultwarden. The exact directives and
-their trade-offs are in [caddy/Caddyfile](caddy/Caddyfile).
+At the ingress, Caddy applies a shared security-header snippet to all three
+sites (HSTS, `nosniff`, a `Referrer-Policy` that keeps share-link tokens out of
+third-party `Referer` headers, `Server` stripped) and, as the edge, ignores any
+client-supplied `X-Forwarded-For` — so a forged header cannot poison the
+per-client login limiters in Immich and Vaultwarden. Directives and trade-offs
+are in [caddy/Caddyfile](caddy/Caddyfile).
 
-Immich's `/api/auth/admin-sign-up` endpoint only ever creates the _first_ admin
-and is rejected once one exists, so it closes itself after you register. Immich's
-**system settings** (version-check, machine learning, sharing, etc.) are
-deliberately _not_ pinned to a config file — they stay editable in the admin UI;
-harden them there if you want.
+Immich's admin-sign-up endpoint only ever creates the _first_ admin, so it
+closes itself once you register. Immich's system settings stay editable in the
+admin UI rather than pinned to a config file — harden them there if you want.
+
+After a **fresh** setup, `./scripts/harden-seafile.sh` adds what the
+`seafile-mc` image won't take from compose `environment:` — secure cookies,
+password-strength and login-attempt limits, 2FA availability, bounded
+share/upload links, outgoing mail — and cuts Seahub's worker count to fit the
+memory budget. It is idempotent; edit the script, not the files it generates.
 
 ## Photos: why the Gallery fork
 
 The photo service runs [Noodle Gallery](https://github.com/open-noodle/gallery)
-(`ghcr.io/open-noodle/gallery-server` + `-ml`) rather than upstream Immich. It is
-a friendly fork that rebases onto every Immich release and keeps the same REST
+(`ghcr.io/open-noodle/gallery-server` + `-ml`) rather than upstream Immich — a
+friendly fork that rebases onto every Immich release and keeps the same REST
 API, so the official Immich iOS/Android apps, the CLI and third-party clients
-all work unchanged. Everything else here is unaffected: the service names,
-volumes, `IMMICH_*` environment variables, networks and Caddy route are
-identical — only the two image names differ.
+all work unchanged. Service names, volumes, `IMMICH_*` variables, networks and
+the Caddy route are identical; only the two image names differ.
 
-`IMMICH_VERSION` therefore carries the **fork's** version, not Immich's; each
-release states the upstream Immich version it is based on. Read the fork's
-release notes before bumping, and expect a geodata re-import — the boot-time
-import is what sizes `immich-server`'s memory ceiling, so a version bump is the
-one routine event that hits the memory budget.
+`IMMICH_VERSION` therefore carries the **fork's** version, not Immich's, and
+each release states the upstream version it is based on. Read the fork's release
+notes before bumping, and expect a geodata re-import — that boot-time import is
+what sizes `immich-server`'s memory ceiling, so a version bump is the one
+routine event that stresses the memory budget.
 
 ## Resource footprint
 
-The stack is tuned to run on a **4 GB** machine (e.g. a Hetzner **CX22**). Every
-long-running service has a hard memory ceiling so no single service can balloon
-and OOM the host; steady-state usage is **≈ 1.3–1.4 GB**. The ceilings
-deliberately over-subscribe, because the peaks do not coincide, and
-`prod-setup.sh` adds a swap file so a rare overlap becomes a slowdown rather
-than an OOM kill. Each ceiling and the tuning that goes with it (Postgres cache
-sizes, the ML model TTL, Seahub's worker count, …) is commented at the service
-it applies to in [docker-compose.yml](docker-compose.yml).
-
-After a **fresh** setup, apply the Seafile config once the server is
-bootstrapped:
-
-```bash
-./scripts/harden-seafile.sh
-```
-
-It adds the settings the `seafile-mc` image won't take from compose
-`environment:` — secure cookies, password-strength and login-attempt limits,
-2FA availability, bounded share/upload links, outgoing mail — and cuts the
-Seahub worker count to fit the memory budget. It is idempotent, so re-run it
-after any change; edit the script, not the files it generates.
+Tuned for a **4 GB** machine (e.g. a Hetzner **CX22**). Every long-running
+service has a hard memory ceiling, so none can balloon and OOM the host;
+steady-state usage is **≈ 1.3–1.4 GB**. The ceilings deliberately
+over-subscribe, because the peaks do not coincide, and `prod-setup.sh` adds a
+swap file so a rare overlap becomes a slowdown rather than an OOM kill. Each
+ceiling and its tuning (Postgres cache sizes, the ML model TTL, Seahub's worker
+count, …) is commented at the service it applies to in
+[docker-compose.yml](docker-compose.yml).
 
 ## Secrets: setup vs runtime
 
-Secrets are split into two files by lifecycle, so the credentials Compose loads
-into the running stack on every `up` never include human-account passwords:
+Secrets are split by lifecycle, so the credentials Compose loads on every `up`
+never include human-account passwords:
 
 |                     | **Runtime** secrets                          | **Setup-only** secrets                              |
 | ------------------- | -------------------------------------------- | --------------------------------------------------- |
@@ -404,22 +377,19 @@ into the running stack on every `up` never include human-account passwords:
 | Loaded by           | Compose, on **every** `up`                   | only `init.sh`, `verify.sh`, and the **first** `up` |
 | Contents            | DB / Redis / Storage Box / JWT machine creds | the first Seafile admin account                     |
 
-`scripts/init.sh` generates both (each `chmod 600`, both gitignored). The setup
-file is **not** referenced by the base `docker-compose.yml`, so a normal
-`docker compose up -d` never puts admin credentials into a container's
-environment: Seafile's first-boot seeding vars live in a small overlay,
-`docker-compose.setup.yml`, applied only on the first `up`. The same overlay
-opens Vaultwarden's signups and web vault for that first `up` so you can
-register your account; the next plain `up` reverts both to the hardened runtime
-defaults. Immich and Vaultwarden admins are registered in the browser, so they
-have no entry in either file.
+`scripts/init.sh` generates both (each `chmod 600`, both gitignored). The base
+`docker-compose.yml` never references the setup file, so a normal `up` puts no
+admin credentials into any container: Seafile's first-boot seeding vars live in
+`docker-compose.setup.yml`, applied only on the first `up`. That overlay also
+opens Vaultwarden's signups and web vault for that one run. Immich and
+Vaultwarden admins are registered in the browser, so they appear in neither
+file.
 
 Once your accounts exist, the secret of record is the account itself: **store
-the admin passwords in Vaultwarden.** You can keep the setup file (so
-`verify.sh`'s Seafile login needs no prompt) or back it up separately and
-remove it from the box — runtime is unaffected either way. Keep both files in
-your offline backup; losing the runtime file means losing the DB/JWT/box
-credentials.
+the admin passwords in Vaultwarden.** Keep the setup file (so `verify.sh`'s
+Seafile login needs no prompt) or back it up separately and remove it from the
+box — runtime is unaffected either way. Keep both files in your offline backup;
+losing the runtime file means losing the DB/JWT/box credentials.
 
 ## Operations
 
@@ -430,23 +400,20 @@ docker compose down                                 # stop (keeps volumes/data)
 docker compose pull && docker compose up -d         # update images
 ```
 
-**What to back up.** The **fast** volumes hold the databases + metadata (in
-production they live under `DATA_ROOT` on the attached volume) — note that
-Seafile is useless without its MariaDB, even though its blocks are on the box.
-The bulk blobs live on the **Storage Box**, and **a live Storage Box mount is
-not a backup** — enable the box's scheduled **snapshots** so a deletion or
-ransomware event is recoverable. The env files hold the secrets; back them up
-securely and separately. See
-[Secrets: setup vs runtime](#secrets-setup-vs-runtime).
+**What to back up.** The **fast** volumes hold the databases and metadata (in
+production, under `DATA_ROOT` on the attached volume) — Seafile is useless
+without its MariaDB even though its blocks are on the box. The bulk blobs live
+on the **Storage Box**, and **a live mount is not a backup**: enable the box's
+scheduled **snapshots** so a deletion or ransomware event is recoverable. The
+env files hold the secrets — back them up securely and separately.
 
 **Automated backup (`scripts/backup.sh`):** writes _consistent_ dumps of the
 attached-volume state (Immich's Postgres, Seafile's three MariaDB databases,
-Vaultwarden's SQLite + data folder, and Caddy's TLS material) to the Storage
-Box, verifying each artifact before it replaces the previous one. It keeps a
-single latest set and **relies on the box's free, automatic snapshots for dated
-history** (so enable those). The bulk blobs are already on the box and are not
-re-copied. `prod-setup.sh` installs + enables the daily `systemd` timer (re-run
-it to refresh the unit after an update):
+Vaultwarden's SQLite + data folder, Caddy's TLS material) to the Storage Box,
+verifying each artifact before it replaces the previous one. It keeps a single
+latest set and **relies on the box's free snapshots for dated history** (so
+enable those); the bulk blobs are already on the box and are not re-copied.
+`prod-setup.sh` installs and enables the daily `systemd` timer:
 
 ```bash
 systemctl list-timers pc-backup.timer        # next run (default 03:30 daily)
@@ -455,8 +422,10 @@ source scripts/prod.env && sudo -E ./scripts/backup.sh   # run on demand
 ```
 
 **Restore (`scripts/restore.sh`):** reverses the backup, stopping only the
-services it touches. Restore is destructive, so it prompts for confirmation (or
-pass `--yes`); restore a subset with `./scripts/restore.sh vaultwarden --yes`.
+services it touches. It is destructive, so it prompts for confirmation unless
+you pass `--yes`; restore a subset with `./scripts/restore.sh vaultwarden
+--yes`. Run `--check` periodically to confirm the latest backup is actually
+restorable:
 
 ```bash
 source scripts/prod.env
@@ -465,14 +434,12 @@ sudo -E ./scripts/restore.sh --check        # verify-only: checksums + a trial l
 sudo -E ./scripts/restore.sh --yes          # restore everything
 ```
 
-Run `--check` periodically to confirm the latest backup is actually restorable.
-
 **Storage Box mount watchdog (`scripts/mount-watchdog.sh`):** the kernel CIFS
 mount can wedge when the Storage Box migrates — the mount dies while the app
 still answers, so requests `502` silently. The Seafile and Immich healthchecks
 stat a path under the mount so a wedge reads as `unhealthy`, and a host
-`systemd` timer runs the watchdog every 60s to restart a wedged container.
-`prod-setup.sh` installs + enables the timer; events go to the journal.
+`systemd` timer restarts a wedged container every 60s. `prod-setup.sh` installs
+and enables the timer; events go to the journal:
 
 ```bash
 journalctl -u pc-mount-watchdog.service -n 20    # recent checks / restarts
@@ -481,23 +448,23 @@ journalctl -u pc-mount-watchdog.service -n 20    # recent checks / restarts
 ## Files
 
 ```
-docker-compose.yml     all services, hardening, networks, volumes
-docker-compose.production.yml      production overlay: bind fast volumes to the attached volume
-docker-compose.storagebox-sim.yml  local Samba server that simulates the Storage Box
-docker-compose.setup.yml           first-`up` overlay: seed the Seafile admin, open signups
-.env.example           local config template (copy → .env via scripts/init.sh)
-.env.production.example production config template (copy → .env.production)
-.env.setup.example     setup-only secrets template (initial Seafile admin)
-caddy/Caddyfile        reverse proxy + automatic HTTPS
-scripts/init.sh        generate env-file secrets (.env or .env.production)
-scripts/prod.env       source to point compose + scripts at production
-scripts/prod-setup.sh  one-time host prep (packages, swap, data dirs, Storage Box folders, systemd timers)
-scripts/backup.sh      consistent DB/Vaultwarden/Caddy backup to the Storage Box
-scripts/restore.sh     restore from the Storage Box (--check verifies without changing anything)
-scripts/mount-watchdog.sh  detect + remount a wedged Storage Box CIFS mount (host systemd timer)
-scripts/systemd/       pc-backup.* (daily backup) + pc-mount-watchdog.* (CIFS mount watchdog)
-scripts/harden-seafile.sh  Seahub security settings + worker count (idempotent, run after fresh setup)
-scripts/verify.sh      the three acceptance tests
-scripts/vw-test.mjs    Bitwarden-client crypto used by the password test
-AGENTS.md              conventions + decisions for anyone (human or agent) changing this repo
+docker-compose.yml                 all services, hardening, networks, volumes
+docker-compose.production.yml      overlay: fast volumes onto the attached volume
+docker-compose.storagebox-sim.yml  overlay: local Samba stand-in for the Storage Box
+docker-compose.setup.yml           overlay: first `up` only — seed admin, open signups
+.env.example                       local config template      → .env
+.env.production.example            production config template → .env.production
+.env.setup.example                 setup-only secrets         → .env[.production].setup
+caddy/Caddyfile                    reverse proxy + automatic HTTPS
+scripts/init.sh                    generate the env files with fresh secrets
+scripts/prod.env                   source to point compose + scripts at production
+scripts/prod-setup.sh              one-time host prep (packages, swap, dirs, timers)
+scripts/backup.sh                  consistent backup to the Storage Box (daily timer)
+scripts/restore.sh                 restore from it (--check verifies, changes nothing)
+scripts/mount-watchdog.sh          recover a wedged CIFS mount (60s timer)
+scripts/harden-seafile.sh          Seahub security settings + worker count (idempotent)
+scripts/verify.sh                  the three acceptance tests
+scripts/vw-test.mjs                Bitwarden-client crypto for the password test
+scripts/systemd/                   units for the backup + watchdog timers
+AGENTS.md                          conventions + decisions for changing this repo
 ```

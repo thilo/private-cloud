@@ -13,13 +13,12 @@
 # regenerates config and runs its own nginx across the rootfs. The per-service
 # comments below say why each exception, capability and tmpfs flag is there.
 #
-# Memory budget (a 4 GB host): every long-running service has a mem_limit, a hard
-# ceiling rather than a reservation. Steady state is ~1.3-1.4 GB; the ceilings sum
-# to ~5.1 GB on purpose, because the peaks don't coincide — the biggest one, the
-# Immich geodata import, lands while the ML model is still idle. prod-setup.sh
-# adds a swap file so a rare overlap becomes a slowdown instead of an OOM kill.
-# To use a bigger host, raise the immich-db cache settings and the mem_limits
-# proportionally.
+# Memory budget (4 GB host): every long-running service has a mem_limit — a hard
+# ceiling, not a reservation. Steady state is ~1.3-1.4 GB; the ceilings sum to
+# ~5.1 GB on purpose, because the peaks don't coincide (the biggest, the Immich
+# geodata import, lands while the ML model is idle). prod-setup.sh adds swap so a
+# rare overlap is a slowdown, not an OOM kill. On a bigger host, raise the
+# immich-db cache settings and the mem_limits proportionally.
 
 name: private-cloud
 
@@ -63,12 +62,11 @@ volumes:
   # Ownership is fixed by the mount's uid=/gid= (CIFS can't be chown'd), so this is
   # NOT touched by volume-init. nobrl avoids CIFS byte-range-lock errors; the
   # databases live on local SSD precisely so they never need locking over SMB.
-  # seal turns on SMB3 transport encryption, so blobs travel host<->box as
-  # ciphertext on the wire (requires vers>=3.0, hence SB_SMB_VERS). It is set on
-  # every mount of this share — the two volumes here plus the host mounts in
-  # prod-setup.sh / backup.sh / restore.sh. Transport only: data lands on the box
-  # in plaintext, so snapshots hold plaintext and a restore needs no key. For
-  # at-rest encryption use a Seafile encrypted library (client-side E2EE).
+  # seal turns on SMB3 transport encryption (requires vers>=3.0, hence
+  # SB_SMB_VERS), set on every mount of this share — the two volumes here plus
+  # the host mounts in prod-setup.sh / backup.sh / restore.sh. Transport only:
+  # data lands on the box in plaintext, so snapshots hold plaintext and a restore
+  # needs no key. For at-rest encryption use a Seafile encrypted library.
   # noexec,nosuid,nodev: both shares hold only blobs, config and avatars, never
   # executables. Like any driver_opts change, applying these needs a `docker volume
   # rm` + recreate.
