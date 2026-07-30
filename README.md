@@ -42,10 +42,10 @@ what the stack does and how to run it.
 
 ```
                          ┌───────── Caddy (auto-HTTPS, only ingress) ─────────┐
-  https://seafile.…    → │  seafile-server ─ seafile-db (mariadb) / -redis     │
-       …/notification  → │    └ notification-server (real-time push, ws)       │
-  https://immich.…     → │  immich-server ─ immich-db / immich-redis / -ml     │
-  https://vault.…      → │  vaultwarden (sqlite)                               │
+  https://seafile.…    → │  seafile-server ─ seafile-db (mariadb) / -redis    │
+       …/notification  → │    └ notification-server (real-time push, ws)      │
+  https://immich.…     → │  immich-server ─ immich-db / immich-redis / -ml    │
+  https://vault.…      → │  vaultwarden (sqlite)                              │
                          └────────────────────────────────────────────────────┘
    databases live on internal-only networks · only Caddy publishes host ports
 ```
