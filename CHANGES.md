@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.0.1] — 2026-07-31
+
+### Changed
+
+- Gallery `v5.2.2` → `v5.2.3` (same Immich 3.0.3 base, so no geodata re-import).
+- Vaultwarden `1.36.0-alpine` → `1.37.1-alpine` — required for clients 2026.7.0+,
+  and carries the security fixes from the 1.37.0 advisories.
+- Seafile `13.0-latest` → `13.0.25` and notification-server `13.0-latest` →
+  `13.0.21`: both were floating tags in a block that claims pinning. Their patch
+  numbers do not track each other; `13.0.21` is what `13.0-latest` resolved to.
+
+### Fixed
+
+- Quoted `SMTP_FROM_NAME` in the env templates. `backup.sh`, `restore.sh` and
+  `prod-setup.sh` shell-`source` the env file, so the unquoted `Private Cloud`
+  ran `Cloud` as a command and aborted them at exit 127.
+
 ## [1.0.0] — 2026-07-30
 
 Initial release.
