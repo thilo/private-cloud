@@ -277,9 +277,9 @@ it and all three apps run fine without it (you just get no invite,
 password-reset or notification mail). One credential in the env file covers the
 stack, but it reaches each app differently, because the images differ:
 
-| App         | How it gets the config                                                  |
-| ----------- | ----------------------------------------------------------------------- |
-| Vaultwarden | reads `SMTP_*` directly as container env vars                           |
+| App         | How it gets the config                                                   |
+| ----------- | ------------------------------------------------------------------------ |
+| Vaultwarden | reads `SMTP_*` directly as container env vars                            |
 | Seafile     | takes **no** env vars for mail — `scripts/harden-seafile.sh` writes it   |
 | Immich      | **not env-driven** — set SMTP in its web UI, stored in Immich's database |
 
@@ -467,6 +467,7 @@ scripts/verify.sh                  the three acceptance tests
 scripts/vw-test.mjs                Bitwarden-client crypto for the password test
 scripts/systemd/                   units for the backup + watchdog timers
 AGENTS.md                          conventions + decisions for changing this repo
+CHANGES.md                         release history of this repo
 LICENSE                            MIT — applies to this repo, not to the images
 ```
 
@@ -479,14 +480,14 @@ That covers the orchestration only. The applications it runs are separate
 projects, pulled as prebuilt container images and never redistributed here;
 each keeps its own license:
 
-| Component | License |
-| --- | --- |
-| Noodle Gallery (Immich fork) | AGPL-3.0 |
-| Seafile Community Edition (server core) | AGPL-3.0 |
-| Vaultwarden | AGPL-3.0 |
-| Caddy | Apache-2.0 |
-| MariaDB | GPL-2.0 |
-| Valkey | BSD-3-Clause |
+| Component                               | License      |
+| --------------------------------------- | ------------ |
+| Noodle Gallery (Immich fork)            | AGPL-3.0     |
+| Seafile Community Edition (server core) | AGPL-3.0     |
+| Vaultwarden                             | AGPL-3.0     |
+| Caddy                                   | Apache-2.0   |
+| MariaDB                                 | GPL-2.0      |
+| Valkey                                  | BSD-3-Clause |
 
 Running those images does not put your copy of this configuration under their
 terms, but modifying and distributing the applications themselves does.

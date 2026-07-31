@@ -50,17 +50,6 @@ options with a single caller. Build what is asked for or what is actually used.
 - The local stack needs `node` and `python3` on the host. The Samba simulator
   exercises the same mount path as production, so mount-option changes can and
   should be tested locally before they ship.
-
-## Decisions already taken (don't re-propose)
-
-- **Runtime secrets stay in the env file, not `/run/secrets`.** On a
-  single-node, single-user stack the gain is marginal: reading a container's env
-  already needs root or Docker-socket access (which grants `/run/secrets` too),
-  the env file is `chmod 600` and outside the deploy dir, and several secrets
-  can't be file-mounted anyway (Redis takes its password as a CLI arg, the
-  Storage Box password lives in the CIFS volume options, the Seafile image is
-  env-only). The worthwhile win — keeping *setup* secrets out of the runtime
-  container env — is already implemented via `docker-compose.setup.yml`.
 - **Immich upload speed: tuning stopped at the CIFS mount options.** A
   local-first write path (staging uploads on local SSD behind a storage-template
   loopback, or a mergerfs union over the mount) was rejected: too much machinery
