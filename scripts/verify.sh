@@ -12,6 +12,45 @@ cd "$(dirname "$0")/.."
 # below always prompts for its email + password.
 RUNTIME_ENV="${ENV_FILE:-./.env}"
 SETUP_ENV="${SETUP_ENV_FILE:-${RUNTIME_ENV}.setup}"
+
+# Compose reads the env file as plain KEY=VALUE; backup.sh, restore.sh,
+# prod-setup.sh and this script `source` it as shell. The two parsers only agree
+# while every value that needs quoting has it: unquoted, a space makes the shell
+# run the rest of the line as a command, and `$`/backticks expand. Checked here,
+# before anything sources the file.
+env_lint() {
+  local file="$1" bad=0 lineno=0 line key val unsafe
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue   # skips blanks + comments
+    key="${line%%=*}"; val="${line#*=}"
+    [[ -z "$val" ]] && continue
+    [[ "$val" == \'*\' ]] && continue        # single quotes are literal to both
+    unsafe=""
+    if [[ "$val" == \"*\" ]]; then
+      # Double quotes hold the value together, but the shell still expands these.
+      case "$val" in *'$'*|*'`'*) unsafe="\$ or \` inside double quotes is expanded by the shell" ;; esac
+    else
+      [[ "$val" =~ [[:space:]] ]] && unsafe="unquoted value contains whitespace — the shell runs the rest as a command"
+      case "$val" in
+        *'$'*|*'`'*|*';'*|*'&'*|*'|'*|*'<'*|*'>'*|*'('*|*')'*|'~'*)
+          unsafe="unquoted value contains a shell metacharacter" ;;
+      esac
+    fi
+    [[ -n "$unsafe" ]] && { printf '    %s:%s  %s — %s\n' "$file" "$lineno" "$key" "$unsafe" >&2; bad=1; }
+  done < "$file"
+  return "$bad"
+}
+lint_failed=0
+env_lint "$RUNTIME_ENV" || lint_failed=1
+env_lint "$SETUP_ENV"   || lint_failed=1
+if [[ "$lint_failed" == 1 ]]; then
+  echo "  ! env file values above need quoting (\"like this\") — Compose strips the quotes." >&2
+  echo "    Left as is they break backup.sh / restore.sh / prod-setup.sh at the next run." >&2
+  exit 1
+fi
+
 set -a
 . "$RUNTIME_ENV"
 [[ -f "$SETUP_ENV" ]] && . "$SETUP_ENV"

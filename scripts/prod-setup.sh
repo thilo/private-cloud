@@ -15,7 +15,8 @@
 #      cutting disk I/O under memory pressure; persisted via GRUB cmdline),
 #   6. writes /etc/docker/daemon.json for log rotation (requires a one-time
 #      Docker daemon restart: systemctl restart docker),
-#   7. installs + enables the systemd timers (daily backup + mount watchdog).
+#   7. installs + enables the systemd timers (daily backup, weekly restore check,
+#      mount watchdog).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ENV_FILE="${ENV_FILE:-.env.production}"
@@ -91,13 +92,17 @@ else
   echo "    NOTE: run 'systemctl restart docker' to activate (brief container restart)."
 fi
 
-echo "==> [7/7] systemd timers (daily backup + Storage Box mount watchdog)"
+echo "==> [7/7] systemd timers (daily backup, weekly restore check, mount watchdog)"
 # Refreshes the unit files from the repo, so re-running after an update picks up
 # any change. enable --now is idempotent.
-cp scripts/systemd/pc-backup.* scripts/systemd/pc-mount-watchdog.* /etc/systemd/system/
+# pc-notify-failure@.service is a template pulled in by OnFailure= — installed,
+# never enabled.
+cp scripts/systemd/pc-backup.* scripts/systemd/pc-restore-check.* \
+   scripts/systemd/pc-mount-watchdog.* scripts/systemd/pc-notify-failure@.service \
+   /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now pc-backup.timer pc-mount-watchdog.timer
-echo "    installed + enabled: pc-backup.timer, pc-mount-watchdog.timer"
+systemctl enable --now pc-backup.timer pc-restore-check.timer pc-mount-watchdog.timer
+echo "    installed + enabled: pc-backup.timer, pc-restore-check.timer, pc-mount-watchdog.timer"
 
 echo
 echo "Host prepared. Next:  source scripts/prod.env && docker compose up -d"

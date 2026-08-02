@@ -1,0 +1,23 @@
+[Unit]
+Description=private-cloud restore check (prove the latest backup is restorable)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+# No-op unless SMTP_HOST + ALERT_EMAIL are set.
+OnFailure=pc-notify-failure@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/private-cloud
+# ENV_FILE is read by restore.sh, exactly as in pc-backup.service.
+Environment=ENV_FILE=/root/.env.production
+ExecStart=/opt/private-cloud/scripts/restore.sh --check
+# Type=oneshot has no start timeout by default; a wedged CIFS mount would hang
+# the unit forever.
+TimeoutStartSec=1800
+
+# Yields to the running stack. This only covers the check's own processes
+# (gunzip, sha256sum, tar) — the scratch-DB load runs inside pc-immich-db and is
+# bounded by that container's mem_limit instead.
+CPUWeight=20
+Nice=19

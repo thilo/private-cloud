@@ -29,6 +29,11 @@ options with a single caller. Build what is asked for or what is actually used.
 - **Committed `*.example` files use placeholders** (`example.com`, `CHANGEME`).
   Real domains, hosts and passwords belong only in the gitignored `.env`,
   `.env.production` and `*.setup` files.
+- **Env values that need quoting must have it.** Compose reads the file as plain
+  `KEY=VALUE`; `backup.sh`, `restore.sh`, `prod-setup.sh` and `verify.sh`
+  `source` it as shell. Anything with whitespace, `$` or a backtick reads
+  differently to the two, and the shell reading wins silently. `verify.sh` lints
+  for it — run it after editing an env file or template.
 
 ## Deployment reality
 

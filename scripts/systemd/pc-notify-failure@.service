@@ -1,0 +1,13 @@
+[Unit]
+Description=Mail an alert that %i failed
+# No OnFailure= here — a notifier that notifies about itself loops.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/private-cloud
+# The only unit that reads the env file through systemd rather than letting the
+# script `source` it: a value that breaks `source` is one of the failures this
+# alerts about, and a notifier that trips over the same line reports nothing.
+EnvironmentFile=/root/.env.production
+ExecStart=/opt/private-cloud/scripts/notify-failure.sh %i
+TimeoutStartSec=180

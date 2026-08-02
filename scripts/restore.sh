@@ -12,7 +12,11 @@
 # them again. RESTORING OVERWRITES LIVE DATA — it prompts for confirmation (or
 # pass --yes). Use --check first: it verifies sha256 + gzip, loads the Immich
 # dump into a throwaway scratch DB, and runs an integrity check on the
-# Vaultwarden SQLite snapshot, all WITHOUT changing anything live.
+# Vaultwarden SQLite snapshot, all WITHOUT changing anything live. --check also
+# runs weekly on its own timer (scripts/systemd/pc-restore-check.*), so a backup
+# that exists but does not restore surfaces within a week:
+#
+#   systemctl start pc-restore-check.service
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ENV_FILE="${ENV_FILE:-.env.production}"
@@ -83,6 +87,15 @@ verify_integrity() {
 
 # ---- --check: prove restorability without changing anything -----------------
 if [[ "$CHECK" == 1 ]]; then
+  # The scratch load needs room for a transient copy of the Immich DB, and
+  # Postgres holds recycled WAL up to max_wal_size before checkpoints wind it
+  # back down. Skipping (exit 0) rather than failing keeps a tight disk from
+  # mailing an alert every week; the reason lands in the journal.
+  avail=$(df -k --output=avail "$DATA_ROOT" | tail -1)
+  if [[ "$avail" -lt 6291456 ]]; then
+    log "SKIPPED — only $((avail / 1024)) MB free on $DATA_ROOT, need 6 GB for the scratch restore."
+    exit 0
+  fi
   verify_integrity
   if want immich; then
     require_running pc-immich-db

@@ -3,6 +3,28 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.1.0] — 2026-08-01
+
+### Added
+
+- Weekly restore check: `pc-restore-check.timer` (Sundays 05:00) runs the
+  existing `restore.sh --check`, so a backup that exists but does not restore is
+  caught within a week instead of at the moment it is needed. It skips itself
+  when `DATA_ROOT` has under 6 GB free — the scratch load needs room for a
+  transient copy of the Immich DB, plus recycled WAL.
+- Failed-timer email alerts: `OnFailure=` on `pc-backup.service` and
+  `pc-restore-check.service` starts `pc-notify-failure@.service`, which mails the
+  unit's status and journal tail with `curl` (no MTA on the host). Off unless
+  both `SMTP_HOST` and the new `ALERT_EMAIL` are set — the same switch the rest
+  of the mail config uses. Not wired to `pc-mount-watchdog`, whose 60s timer
+  would mail on every failed check.
+- `verify.sh` now checks the env files for values that `source` and Compose
+  would read differently — unquoted whitespace, or `$`/backticks the shell
+  expands — and refuses to run until they are quoted.
+- `TimeoutStartSec=1800` on `pc-backup.service` and `pc-restore-check.service`;
+  `Type=oneshot` defaults to no start timeout, so a wedged CIFS mount could hang
+  a unit indefinitely.
+
 ## [1.0.1] — 2026-07-31
 
 ### Changed

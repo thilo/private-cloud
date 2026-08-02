@@ -36,9 +36,9 @@ what the stack does and how to run it.
 - **The production storage path is testable locally.** A throwaway Samba
   container stands in for the Storage Box, so `docker compose up` exercises the
   same CIFS mount path as production, transport encryption included.
-- **Scripted operations.** Daily consistent backups with a `--check` mode that
-  proves them restorable, a watchdog that recovers a wedged CIFS mount, and a
-  scripted restore.
+- **Scripted operations.** Daily consistent backups, a weekly check that proves
+  them restorable, a watchdog that recovers a wedged CIFS mount, and a scripted
+  restore.
 
 ```
                          ┌───────── Caddy (auto-HTTPS, only ingress) ─────────┐
@@ -103,8 +103,8 @@ ports.
 
 **4. Prepare the host.** One idempotent script installs the packages the backups
 and the CIFS mount need, adds swap, creates the data directories and Storage Box
-folders, and installs the `systemd` timers for the daily backup and the mount
-watchdog:
+folders, and installs the `systemd` timers for the daily backup, the weekly
+restore check and the mount watchdog:
 
 ```bash
 sudo -E ./scripts/prod-setup.sh
@@ -277,11 +277,12 @@ it and all three apps run fine without it (you just get no invite,
 password-reset or notification mail). One credential in the env file covers the
 stack, but it reaches each app differently, because the images differ:
 
-| App         | How it gets the config                                                   |
-| ----------- | ------------------------------------------------------------------------ |
-| Vaultwarden | reads `SMTP_*` directly as container env vars                            |
-| Seafile     | takes **no** env vars for mail — `scripts/harden-seafile.sh` writes it   |
-| Immich      | **not env-driven** — set SMTP in its web UI, stored in Immich's database |
+| App          | How it gets the config                                                   |
+| ------------ | ------------------------------------------------------------------------ |
+| Vaultwarden  | reads `SMTP_*` directly as container env vars                            |
+| Seafile      | takes **no** env vars for mail — `scripts/harden-seafile.sh` writes it   |
+| Immich       | **not env-driven** — set SMTP in its web UI, stored in Immich's database |
+| Timer alerts | `scripts/notify-failure.sh` sends via `curl`; needs `ALERT_EMAIL` too    |
 
 Set the keys in `.env` / `.env.production`, then apply:
 
@@ -424,8 +425,7 @@ source scripts/prod.env && sudo -E ./scripts/backup.sh   # run on demand
 **Restore (`scripts/restore.sh`):** reverses the backup, stopping only the
 services it touches. It is destructive, so it prompts for confirmation unless
 you pass `--yes`; restore a subset with `./scripts/restore.sh vaultwarden
---yes`. Run `--check` periodically to confirm the latest backup is actually
-restorable:
+--yes`:
 
 ```bash
 source scripts/prod.env
@@ -433,6 +433,29 @@ sudo -E ./scripts/restore.sh --check        # verify-only: checksums + a trial l
                                             # of the dumps, WITHOUT changing anything
 sudo -E ./scripts/restore.sh --yes          # restore everything
 ```
+
+**Restore check (`restore.sh --check`):** a backup that exists but does not
+restore is worth nothing, so `--check` also runs on its own weekly timer
+(Sundays 05:00), installed by `prod-setup.sh`. It verifies checksums and gzip,
+loads the Immich dump into a throwaway scratch database, and integrity-checks
+the Vaultwarden SQLite snapshot — changing nothing live:
+
+```bash
+systemctl list-timers pc-restore-check.timer      # next run
+journalctl -u pc-restore-check.service -n 20      # last result
+systemctl start pc-restore-check.service          # check on demand
+```
+
+The scratch load runs inside the live `pc-immich-db`, which is why this is
+weekly rather than nightly, and why the check skips itself when `DATA_ROOT` has
+under 6 GB free (a skip exits 0 and says so in the journal).
+
+**Failed-timer alerts.** With `SMTP_HOST` **and** `ALERT_EMAIL` both set, a
+failed `pc-backup` or `pc-restore-check` run mails you the unit's status and the
+tail of its journal, via `OnFailure=` and
+[pc-notify-failure@.service](scripts/systemd/pc-notify-failure@.service). Leave
+either key empty and nothing is sent — the same off-by-default switch as the
+rest of the mail config. No MTA is installed; `curl` speaks SMTP directly.
 
 **Storage Box mount watchdog (`scripts/mount-watchdog.sh`):** the kernel CIFS
 mount can wedge when the Storage Box migrates — the mount dies while the app
@@ -460,12 +483,13 @@ scripts/init.sh                    generate the env files with fresh secrets
 scripts/prod.env                   source to point compose + scripts at production
 scripts/prod-setup.sh              one-time host prep (packages, swap, dirs, timers)
 scripts/backup.sh                  consistent backup to the Storage Box (daily timer)
-scripts/restore.sh                 restore from it (--check verifies, changes nothing)
+scripts/restore.sh                 restore from it (--check verifies, weekly timer)
 scripts/mount-watchdog.sh          recover a wedged CIFS mount (60s timer)
+scripts/notify-failure.sh          mail an alert when a timer's unit fails
 scripts/harden-seafile.sh          Seahub security settings + worker count (idempotent)
-scripts/verify.sh                  the three acceptance tests
+scripts/verify.sh                  the three acceptance tests + an env-file lint
 scripts/vw-test.mjs                Bitwarden-client crypto for the password test
-scripts/systemd/                   units for the backup + watchdog timers
+scripts/systemd/                   units for the backup, restore-check + watchdog timers
 AGENTS.md                          conventions + decisions for changing this repo
 CHANGES.md                         release history of this repo
 LICENSE                            MIT — applies to this repo, not to the images

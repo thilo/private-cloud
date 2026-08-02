@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly private-cloud restore check
+
+[Timer]
+# Sundays at 05:00 server time — clear of the 03:30 backup (which finishes in a
+# few minutes) so the two never mount the Storage Box or hit the DB at once.
+OnCalendar=Sun *-*-* 05:00:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target
