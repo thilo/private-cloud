@@ -430,7 +430,7 @@ services:
     image: ghcr.io/open-noodle/gallery-ml:${IMMICH_VERSION}
     container_name: pc-immich-ml
     restart: *restart
-    mem_limit: 1024m
+    mem_limit: 1280m
     cpus: "0.75"
     user: "1000:1000"
     environment:

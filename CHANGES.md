@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.1.1] — 2026-08-05
+
+### Changed
+
+- Gallery `v5.2.3` → `v5.3.0` (Immich 3.0.3 → 3.1.0 base).
+- `immich-ml` `mem_limit` `1024m` → `1280m`. Face detection, CLIP, OCR and object
+  detection load as a burst when a job wakes the idle container, and that burst
+  reached the old ceiling.
+
 ## [1.1.0] — 2026-08-01
 
 ### Added
