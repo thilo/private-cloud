@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.1.2] — 2026-08-06
+
+### Changed
+
+- `prod-setup.sh` selects the zswap `zsmalloc` pool and the `lzo-rle`
+  compressor instead of the kernel defaults `zbud`/`lzo`, and puts all three
+  zswap settings on the kernel cmdline via
+  `/etc/default/grub.d/99-private-cloud.cfg`. They are module parameters, so a
+  runtime write alone reverts on reboot.
+
 ## [1.1.1] — 2026-08-05
 
 ### Changed
