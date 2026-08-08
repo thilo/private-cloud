@@ -3,6 +3,25 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.2.0] — 2026-08-11
+
+### Added
+
+- `prod-setup.sh` pins `docker-ce` and `containerd.io` to the majors named by
+  the new `DOCKER_MAJOR`/`CONTAINERD_MAJOR` env values, and allows the Docker
+  repo in `unattended-upgrades`. The engine was previously never patched
+  automatically; a new major still never arrives unattended.
+- `pc-docker-major-check.timer` (Mondays 06:00) mails when a `docker-ce` major
+  above the pin exists. Docker patches only the current major, so the pin would
+  otherwise become a silent freeze.
+
+### Changed
+
+- `prod-setup.sh` writes `live-restore` into `/etc/docker/daemon.json` and
+  merges that file with `jq` instead of leaving it untouched when present.
+  Daemon upgrades no longer bounce the stack, and re-running the script applies
+  the setting without clobbering keys it does not own.
+
 ## [1.1.3] — 2026-08-08
 
 ### Changed

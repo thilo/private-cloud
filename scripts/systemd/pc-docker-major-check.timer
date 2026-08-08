@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly check for a Docker major above the pinned line
+
+[Timer]
+# Mondays at 06:00 server time — clear of the 03:30 backup and the Sunday 05:00
+# restore check. Nothing here is urgent; a week's notice is ample.
+OnCalendar=Mon *-*-* 06:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

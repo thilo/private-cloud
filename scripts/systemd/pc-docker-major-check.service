@@ -1,0 +1,15 @@
+[Unit]
+Description=private-cloud check for a Docker major above the pinned line
+# No docker.service dependency — this reads apt metadata, not the daemon.
+# "Failure" here is the signal, not a fault: the script exits non-zero when a
+# newer major exists, which is what sends the mail. The unit showing as failed
+# afterwards is expected, and clears on the next run once the pin is raised.
+OnFailure=pc-notify-failure@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/private-cloud
+# ENV_FILE is read by docker-major-check.sh, exactly as in pc-backup.service.
+Environment=ENV_FILE=/root/.env.production
+ExecStart=/opt/private-cloud/scripts/docker-major-check.sh
+TimeoutStartSec=300
