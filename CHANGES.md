@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.1.3] — 2026-08-08
+
+### Changed
+
+- `immich-ml` and `immich-server` divide the CPU by relative weight
+  (`cpu_shares`) instead of fixed `cpus:` quotas. `immich-ml` keeps its previous
+  share while `immich-server` is busy, but is no longer throttled against CPU
+  nothing else is using.
+
 ## [1.1.2] — 2026-08-06
 
 ### Changed
