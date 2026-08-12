@@ -45,7 +45,12 @@
 		# cross-site so Seafile/Immich share-link tokens in the URL never leak,
 		# but keeps it same-origin for Seahub's Django CSRF check.
 		Referrer-Policy "same-origin"
+		# Two halves of the same banner: Caddy sets Server on its own responses and
+		# Via on proxied ones (2.10+). Neither carries a version, so dropping them
+		# hides the product name only. The :80 -> :443 redirects are synthesized by
+		# automatic HTTPS, outside these site blocks, and still answer Server: Caddy.
 		-Server
+		-Via
 	}
 }
 

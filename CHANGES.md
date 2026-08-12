@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.2.1] — 2026-08-11
+
+### Changed
+
+- `security_headers` also removes `Via`, which named the proxy on every
+  response.
+- `CADDY_IMAGE` pins an exact Caddy version instead of the floating `2-alpine`
+  tag, matching how the other images are pinned.
+
 ## [1.2.0] — 2026-08-11
 
 ### Added
