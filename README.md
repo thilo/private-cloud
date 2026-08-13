@@ -461,8 +461,10 @@ rest of the mail config. No MTA is installed; `curl` speaks SMTP directly.
 mount can wedge when the Storage Box migrates — the mount dies while the app
 still answers, so requests `502` silently. The Seafile and Immich healthchecks
 stat a path under the mount so a wedge reads as `unhealthy`, and a host
-`systemd` timer restarts a wedged container every 60s. `prod-setup.sh` installs
-and enables the timer; events go to the journal:
+`systemd` timer restarts a wedged container every 60s. Three consecutive failed
+recovery attempts mail an alert, once per incident, under the same `SMTP_HOST` +
+`ALERT_EMAIL` switch as the rest. `prod-setup.sh` installs and enables the
+timer; events go to the journal:
 
 ```bash
 journalctl -u pc-mount-watchdog.service -n 20    # recent checks / restarts

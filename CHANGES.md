@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.2.2] — 2026-08-13
+
+### Fixed
+
+- `mount-watchdog.sh` skipped any container that was not running, so one whose
+  CIFS volume failed to mount was never retried. It now starts those too; a
+  container stopped by hand has no `State.Error` and is still left alone.
+- `mount-watchdog.sh` mails through `OnFailure=` after three failed recovery
+  attempts, once per incident. It previously exited 0 always, so no alert could
+  fire.
+
 ## [1.2.1] — 2026-08-11
 
 ### Changed

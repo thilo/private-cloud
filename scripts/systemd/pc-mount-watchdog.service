@@ -2,6 +2,7 @@
 Description=private-cloud Storage Box mount watchdog (detect + remount wedged CIFS)
 After=docker.service
 Requires=docker.service
+OnFailure=pc-notify-failure@%n.service
 
 [Service]
 Type=oneshot
