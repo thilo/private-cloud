@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.2.3] — 2026-08-14
+
+### Fixed
+
+- Both Storage Box volumes pass `addr=${SB_HOST}`, which stops Docker's local
+  volume driver from replacing the hostname in `device:` with an IP. The mount
+  keeps the hostname, so the kernel can resolve the box's current address when it
+  reconnects.
+
 ## [1.2.2] — 2026-08-13
 
 ### Fixed

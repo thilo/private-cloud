@@ -3,9 +3,12 @@
 # when the Hetzner Storage Box migrates/reboots (STATUS_LOGON_FAILURE loop): the
 # mount dies while the app still answers, so requests 502 silently. A Docker CIFS
 # volume can only be remounted by restarting the container, so on a wedge we
-# restart it. A migration can also change the box's address, in which case the
-# mount fails outright (STATUS_ACCOUNT_DISABLED against the old host, surfaced by
-# Docker as "key has been revoked") and the restart leaves the container stopped;
+# restart it. The addr= mount option (see docker-compose.yml) lets the kernel
+# reconnect to a moved box on its own, which is faster than a restart but only
+# covers wedges that reach the reconnect path; this covers the rest. A migration
+# can also change the box's address, in which case the mount fails outright
+# (STATUS_ACCOUNT_DISABLED against the old host, surfaced by Docker as "key has
+# been revoked") and the restart leaves the container stopped;
 # we keep trying to start it, since the address moves once DNS catches up.
 # Runs from pc-mount-watchdog.timer every 60s; a per-container cooldown avoids
 # thrashing if the box is genuinely down. After RECOVERY_ATTEMPTS consecutive
