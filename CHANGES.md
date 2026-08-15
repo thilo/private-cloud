@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.2.4] — 2026-08-15
+
+### Fixed
+
+- `mount-watchdog.sh` now stops and starts the containers together instead of one at
+  a time. Both mounts share one connection to the box, and the kernel keeps that
+  connection alive while any container still holds it, so a container restarted on
+  its own came back to the same broken connection. Its cooldown, attempt count and
+  `OnFailure=` alert are now per incident rather than per container.
+
 ## [1.2.3] — 2026-08-14
 
 ### Fixed

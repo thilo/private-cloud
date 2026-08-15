@@ -1,87 +1,78 @@
 #!/usr/bin/env bash
-# Storage Box mount watchdog. The kernel CIFS client can wedge its SMB session
-# when the Hetzner Storage Box migrates/reboots (STATUS_LOGON_FAILURE loop): the
-# mount dies while the app still answers, so requests 502 silently. A Docker CIFS
-# volume can only be remounted by restarting the container, so on a wedge we
-# restart it. The addr= mount option (see docker-compose.yml) lets the kernel
-# reconnect to a moved box on its own, which is faster than a restart but only
-# covers wedges that reach the reconnect path; this covers the rest. A migration
-# can also change the box's address, in which case the mount fails outright
-# (STATUS_ACCOUNT_DISABLED against the old host, surfaced by Docker as "key has
-# been revoked") and the restart leaves the container stopped;
-# we keep trying to start it, since the address moves once DNS catches up.
-# Runs from pc-mount-watchdog.timer every 60s; a per-container cooldown avoids
-# thrashing if the box is genuinely down. After RECOVERY_ATTEMPTS consecutive
-# failed attempts the run exits non-zero once, so OnFailure= mails. Events go to
-# the journal (journalctl -u pc-mount-watchdog.service).
+# Storage Box mount watchdog. When the Hetzner Storage Box migrates or reboots, the
+# kernel CIFS client can wedge its SMB session (STATUS_LOGON_FAILURE loop): the mount
+# dies while the app still answers, so storage-touching requests 502 while `docker ps`
+# looks healthy. A Docker CIFS volume can only be remounted by restarting its
+# container. (addr= in docker-compose.yml lets the kernel recover on its own, but only
+# for wedges that reach the reconnect path; this covers the rest.)
+#
+# Every container is stopped and started TOGETHER, even when only one mount is bad:
+# they share one CIFS connection (same host, same credentials) and the kernel refcounts
+# it, so restarting them one at a time never drops it to zero and the remount lands
+# straight back on the broken connection.
+#
+# Runs from pc-mount-watchdog.timer every 60s; the cooldown keeps a genuinely-down box
+# from causing a bounce per tick. Events go to the journal
+# (journalctl -u pc-mount-watchdog.service).
 set -uo pipefail
 
 CHECKS=(  # container : path under the CIFS mount to stat
   "pc-seafile:/shared/seafile/seafile-data"
   "pc-immich-server:/data/library"
 )
-STATE_DIR=/run/pc-mount-watchdog; COOLDOWN=300; RECOVERY_ATTEMPTS=3
-mkdir -p "$STATE_DIR"
+STATE=/run/pc-mount-watchdog.state  # "<epoch of last bounce> <consecutive attempts>"
+COOLDOWN=300; RECOVERY_ATTEMPTS=3
 
-log() { printf '%s  %s\n' "$(date '+%F %T')" "$*"; }
+log() { printf '%s  pc-mount-watchdog: %s\n' "$(date '+%F %T')" "$*"; }
 
-# Count a recovery attempt; return 0 when this run should alert, i.e. the
-# threshold is reached and no mail has gone out for this incident yet. Counted at
-# the attempt, not on the docker exit status: a restart that returns 0 but comes
-# back to a still-wedged mount has not recovered anything. A working attempt
-# clears the count at the next check, well before the threshold.
-record_attempt() {
-  local cont="$1" n
-  n=$(( $(cat "$STATE_DIR/$cont.fails" 2>/dev/null || echo 0) + 1 ))
-  echo "$n" > "$STATE_DIR/$cont.fails"
-  (( n >= RECOVERY_ATTEMPTS )) && [[ ! -f "$STATE_DIR/$cont.notified" ]]
-}
-
-# The mount is healthy again: clear the incident so the next one alerts afresh.
-clear_failures() {
-  local cont="$1"
-  [[ -f "$STATE_DIR/$cont.notified" ]] && log "pc-mount-watchdog: $cont recovered"
-  rm -f "$STATE_DIR/$cont.fails" "$STATE_DIR/$cont.notified" "$STATE_DIR/$cont"
-}
-
-alert=0
+bounce=()
+bad=0
 
 for entry in "${CHECKS[@]}"; do
   cont="${entry%%:*}"; path="${entry#*:}"
+  running=""; err=""
+  # State.Error read last so it gets the rest of the line, spaces included.
+  read -r running err < <(docker inspect -f '{{.State.Running}} {{.State.Error}}' "$cont" 2>/dev/null)
 
-  if [[ "$(docker inspect -f '{{.State.Running}}' "$cont" 2>/dev/null)" == "true" ]]; then
-    if timeout 12 docker exec "$cont" stat "$path" >/dev/null 2>&1; then
-      clear_failures "$cont"; continue
-    fi
-    action=restart; reason="mount ($path) wedged"
+  if [[ "$running" == "true" ]]; then
+    # Healthy containers join the bounce too: while one holds the mount, the shared
+    # connection lives on and the others remount straight back onto it.
+    bounce+=("$cont")
+    timeout 12 docker exec "$cont" stat "$path" >/dev/null 2>&1 && continue
+    log "$cont: mount ($path) wedged"
+  elif [[ -n "$err" ]]; then
+    # Mount failed at start — the box moved and Docker reports "key has been revoked".
+    # Keep starting it; the new address resolves once DNS catches up.
+    bounce+=("$cont")
+    log "$cont: stopped, did not start: $err"
   else
-    # Stopped. Only our business if Docker recorded a start error — that is the
-    # failed-remount case. A container stopped by hand has no error and is left
-    # alone, which is what the plain Running check used to give us.
-    err="$(docker inspect -f '{{.State.Error}}' "$cont" 2>/dev/null)"
-    [[ -n "$err" ]] || continue
-    action=start; reason="stopped, did not start: $err"
+    continue  # stopped by hand: holds no mount, so leave it out and leave it alone
   fi
-
-  last="$STATE_DIR/$cont"; now=$(date +%s)
-  if [[ -f "$last" ]] && (( now - $(cat "$last") < COOLDOWN )); then
-    log "pc-mount-watchdog: $cont still failing ($reason); within cooldown, not retrying"
-    continue
-  fi
-  echo "$now" > "$last"
-
-  log "pc-mount-watchdog: $cont $reason -- ${action}ing to remount"
-  if docker "$action" "$cont" >/dev/null 2>&1; then
-    log "pc-mount-watchdog: docker $action $cont returned ok"
-  else
-    log "pc-mount-watchdog: docker $action $cont failed"
-  fi
-
-  if record_attempt "$cont"; then
-    log "pc-mount-watchdog: $cont unrecovered after $RECOVERY_ATTEMPTS attempts -- alerting"
-    touch "$STATE_DIR/$cont.notified"; alert=1
-  fi
+  bad=1
 done
 
-# Non-zero exactly once per incident, so OnFailure= mails without a mail per tick.
-exit "$alert"
+if (( bad == 0 )); then
+  [[ -f "$STATE" ]] && log "mounts recovered"
+  rm -f "$STATE"
+  exit 0
+fi
+
+now=$(date +%s); last=0; n=0
+[[ -f "$STATE" ]] && read -r last n < "$STATE"
+if (( now - last < COOLDOWN )); then
+  log "within cooldown, not retrying"
+  exit 0
+fi
+
+log "bouncing together: ${bounce[*]}"
+docker stop "${bounce[@]}" >/dev/null 2>&1
+docker start "${bounce[@]}" >/dev/null 2>&1 || log "containers did not start"
+
+# Count attempts, not docker's exit status: a bounce that returns 0 onto a still-wedged
+# mount recovered nothing. n only grows, so == alerts exactly once per incident.
+echo "$now $(( ++n ))" > "$STATE"
+if (( n == RECOVERY_ATTEMPTS )); then
+  log "unrecovered after $RECOVERY_ATTEMPTS attempts -- alerting"
+  exit 1  # OnFailure= mails
+fi
+exit 0
