@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.3.2] — 2026-09-07
+
+### Fixed
+
+- `mount-watchdog.sh` no longer reads a container that has just started as a wedged
+  mount. A container comes up before its mount does, so a deploy landing between two
+  ticks looked exactly like a wedge and got bounced mid-deploy; containers younger
+  than the grace period are now left alone, and a tick that skipped one keeps the
+  state file instead of reporting recovery.
+
 ## [1.3.1] — 2026-09-07
 
 ### Changed
