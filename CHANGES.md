@@ -3,6 +3,25 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.3.0] — 2026-09-06
+
+### Added
+
+- `immich-preview-mover`, an optional service that keeps Immich's previews on the
+  Storage Box and only its thumbnails on local SSD. Immich puts both derivatives in
+  one directory and separates them by filename, so no mount can split them; the
+  service moves each finished preview and leaves a symlink, so the path in
+  `asset_file.path` still resolves and the database is untouched. It also deletes
+  previews nothing points at any more, monthly. `--once` runs a single pass, which is
+  also the migration of an existing `thumbs/` tree; `--reclaim` runs the cleanup by
+  hand, deleting only when given `--yes`.
+
+### Changed
+
+- `mount-watchdog.sh` checks and bounces `pc-immich-preview-mover` as well. It holds
+  the same Storage Box mount, and that connection only drops when every container
+  holding it stops.
+
 ## [1.2.4] — 2026-08-15
 
 ### Fixed

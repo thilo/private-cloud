@@ -139,11 +139,27 @@ the server's local SSD.
 
 | Data                                              | Location               | Volume(s)                                     |
 | ------------------------------------------------- | ---------------------- | --------------------------------------------- |
-| Immich originals (`library/`, `upload/`)          | **Storage Box** (CIFS) | `immich_data`                                 |
+| Immich originals + previews (`library/`, `upload/`, `previews/`) | **Storage Box** (CIFS) | `immich_data`                   |
 | Immich thumbnails / transcoded video              | local SSD              | `immich_thumbs`, `immich_encoded`             |
 | Seafile object store + config (`/shared/seafile`) | **Storage Box** (CIFS) | `seafile_box`                                 |
 | Seafile logs                                      | local SSD              | `seafile_logs`                                |
 | All databases + Vaultwarden                       | local SSD              | `immich_db`, `seafile_db`, `vaultwarden_data` |
+
+**`immich-preview-mover` is optional.** Immich puts both of an asset's
+derivatives in one directory and separates them by filename, so no mount can
+split them. The service moves the previews — the large half — to the box and
+leaves a symlink, so the path Immich stored still resolves and only the
+thumbnails every grid scroll reads stay on local SSD. Leave it out if the SSD has
+room; nothing else depends on it. It also deletes previews on the box that
+nothing points at any more, monthly. To run that pass by hand — it deletes only
+when given `--yes`:
+
+```bash
+docker compose exec immich-preview-mover sh /scripts/immich-preview-mover.sh --reclaim
+```
+
+Mechanism and failure modes:
+[scripts/immich-preview-mover.sh](scripts/immich-preview-mover.sh).
 
 Seafile's real metadata — libraries, users, the file tree — lives in **MariaDB**
 and stays local; only the object store and config sit on the box.
@@ -487,6 +503,7 @@ scripts/prod-setup.sh              one-time host prep (packages, swap, dirs, tim
 scripts/backup.sh                  consistent backup to the Storage Box (daily timer)
 scripts/restore.sh                 restore from it (--check verifies, weekly timer)
 scripts/mount-watchdog.sh          recover a wedged CIFS mount (60s timer)
+scripts/immich-preview-mover.sh    move Immich previews to the box, symlink them back
 scripts/notify-failure.sh          mail an alert when a timer's unit fails
 scripts/harden-seafile.sh          Seahub security settings + worker count (idempotent)
 scripts/verify.sh                  the three acceptance tests + an env-file lint

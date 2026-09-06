@@ -433,6 +433,42 @@ services:
       retries: 5
       start_period: 120s
 
+  # Optional. Carves previews back out to the Storage Box. Immich puts both
+  # derivatives of an asset in the same thumbs/ directory and separates them by
+  # filename only, so there is no mount (and no Immich setting) that can split
+  # them — a sweep moves the previews and symlinks them, keeping the small,
+  # scroll-hot thumbnails on local SSD, and monthly deletes the ones on the box
+  # that nothing points at any more. Rationale and failure modes:
+  # scripts/immich-preview-mover.sh.
+  # Nothing else depends on this service: delete it and Immich runs unchanged with
+  # previews on local SSD. Previews it already moved keep working either way, since
+  # immich-server resolves their symlinks over the mount it holds itself.
+  # It mounts the same two volumes as immich-server at the same paths, so the
+  # symlink targets it writes resolve identically in both containers.
+  immich-preview-mover:
+    image: alpine:3.20
+    container_name: pc-immich-preview-mover
+    restart: *restart
+    # A busybox find over the thumbs tree; the copies stream through cp.
+    mem_limit: 32m
+    user: "1000:1000"
+    command: ["sh", "/scripts/immich-preview-mover.sh"]
+    volumes:
+      - immich_data:/data
+      - immich_thumbs:/data/thumbs
+      # The directory, not the file: a single-file bind mount pins the container to
+      # the inode it started with, so editing the script leaves the container
+      # running — and `exec`ing — the old copy. Through a directory the lookup
+      # resolves each time, so --reclaim always runs what is on disk.
+      - ./scripts:/scripts:ro
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
   immich-ml:
     image: ghcr.io/open-noodle/gallery-ml:${IMMICH_VERSION}
     container_name: pc-immich-ml

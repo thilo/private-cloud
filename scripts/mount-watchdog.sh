@@ -19,6 +19,7 @@ set -uo pipefail
 CHECKS=(  # container : path under the CIFS mount to stat
   "pc-seafile:/shared/seafile/seafile-data"
   "pc-immich-server:/data/library"
+  "pc-immich-preview-mover:/data/library"  # holds the same mount; previews/ may not exist yet
 )
 STATE=/run/pc-mount-watchdog.state  # "<epoch of last bounce> <consecutive attempts>"
 COOLDOWN=300; RECOVERY_ATTEMPTS=3

@@ -70,6 +70,10 @@ services:
     depends_on:
       storagebox:
         condition: service_healthy
+  immich-preview-mover:
+    depends_on:
+      storagebox:
+        condition: service_healthy
   seafile-server:
     depends_on:
       storagebox:
