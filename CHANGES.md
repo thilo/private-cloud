@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.3.3] — 2026-09-08
+
+### Changed
+
+- Vaultwarden `1.37.1-alpine` → `1.37.2-alpine` — required for clients 2026.8.0+.
+
 ## [1.3.2] — 2026-09-07
 
 ### Fixed
