@@ -40,8 +40,9 @@ options with a single caller. Build what is asked for or what is actually used.
 - The production host has **no git checkout**. The repo is copied there
   (scp/rsync), so **whatever is in the working tree at copy time is what
   ships** — be on `main` and clean before copying.
-- Runtime secrets live **outside** the deploy directory (`/root/.env.production`,
-  `/root/.env.production.setup`), so a re-copy never overwrites them. Every
+- Runtime secrets live **outside** the deploy directory in `/root/.env.production`,
+  the only env file the host keeps, so a re-copy never overwrites it.
+  `/root/.env.production.setup` exists only until the first `up`. Every
   production command needs `source scripts/prod.env` first; without it Compose
   targets the local stack and the wrong env file.
 - Overlays are how local and production differ. Never fork

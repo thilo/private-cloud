@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.4.0] — 2026-09-11
+
+### Added
+
+- `scripts/deploy.sh` — copies the working tree to the host and reconciles the stack.
+  The host has no git, so it refuses to run from a branch other than `main`.
+
+### Changed
+
+- `prod-setup.sh` now caps the systemd journal at 1 GB.
+- README updated about removing `/root/.env.production.setup` from the server after the first `up`.
+
 ## [1.3.3] — 2026-09-08
 
 ### Changed

@@ -75,8 +75,10 @@ $EDITOR .env.production          # set domains, CADDY_TLS, SB_*, DATA_ROOT
 $EDITOR .env.production.setup    # set the admin email(s) to your real address
 ```
 
-Copy **both** to the server **outside the deploy directory**, so a re-deploy
-never touches or exposes them:
+Copy both to `/root` on the server, **outside the deploy directory**, so a
+re-deploy never touches or exposes them. `.env.production` is the only env file
+the server keeps; `.env.production.setup` is needed only until the first `up`
+(step 5):
 
 ```bash
 scp .env.production .env.production.setup root@<server>:/root/
@@ -121,6 +123,7 @@ docker compose -f docker-compose.yml -f docker-compose.production.yml \
 # register your Immich + Vaultwarden accounts now in a browser, while the setup overlay is up
 ./scripts/harden-seafile.sh      # Seahub security settings (after a fresh setup)
 ./scripts/verify.sh              # acceptance tests
+rm /root/.env.production.setup   # setup done; keep it in your offline backup
 
 # Day-to-day afterwards (prod.env already sourced):  docker compose up -d
 ```
@@ -403,9 +406,9 @@ Vaultwarden admins are registered in the browser, so they appear in neither
 file.
 
 Once your accounts exist, the secret of record is the account itself: **store
-the admin passwords in Vaultwarden.** Keep the setup file (so `verify.sh`'s
-Seafile login needs no prompt) or back it up separately and remove it from the
-box — runtime is unaffected either way. Keep both files in your offline backup;
+the admin passwords in Vaultwarden** and remove the setup file from the server.
+Runtime never reads it; `verify.sh`'s Seafile login does, so point
+`SETUP_ENV_FILE` at a copy for that run. Keep both files in your offline backup;
 losing the runtime file means losing the DB/JWT/box credentials.
 
 ## Operations
@@ -500,6 +503,7 @@ caddy/Caddyfile                    reverse proxy + automatic HTTPS
 scripts/init.sh                    generate the env files with fresh secrets
 scripts/prod.env                   source to point compose + scripts at production
 scripts/prod-setup.sh              one-time host prep (packages, swap, dirs, timers)
+scripts/deploy.sh                  copy the working tree to the host and reconcile
 scripts/backup.sh                  consistent backup to the Storage Box (daily timer)
 scripts/restore.sh                 restore from it (--check verifies, weekly timer)
 scripts/mount-watchdog.sh          recover a wedged CIFS mount (60s timer)

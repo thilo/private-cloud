@@ -18,7 +18,8 @@
 #   7. pins the Docker engine to ${DOCKER_MAJOR}.x and lets unattended-upgrades
 #      apply that line's patch releases,
 #   8. installs + enables the systemd timers (daily backup, weekly restore check,
-#      mount watchdog, weekly Docker-major check).
+#      mount watchdog, weekly Docker-major check),
+#   9. caps the systemd journal at 1 GB.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ENV_FILE="${ENV_FILE:-.env.production}"
@@ -27,7 +28,7 @@ set -a; . "$ENV_FILE"; set +a
 
 if [[ $EUID -ne 0 ]]; then echo "Run as root (sudo -E $0)." >&2; exit 1; fi
 
-echo "==> [1/8] cifs-utils + sqlite3 + jq (sqlite3 = consistent Vaultwarden backups)"
+echo "==> [1/9] cifs-utils + sqlite3 + jq (sqlite3 = consistent Vaultwarden backups)"
 need=()
 command -v mount.cifs >/dev/null 2>&1 || need+=(cifs-utils)
 command -v sqlite3   >/dev/null 2>&1 || need+=(sqlite3)
@@ -41,7 +42,7 @@ else
   echo "    installed: ${need[*]}"
 fi
 
-echo "==> [2/8] swap"
+echo "==> [2/9] swap"
 if [[ -n "$(swapon --show --noheadings 2>/dev/null)" ]]; then
   echo "    swap already active — leaving as is."
 else
@@ -53,14 +54,14 @@ else
   echo "    created /swapfile (2G) and enabled it."
 fi
 
-echo "==> [3/8] data directories on the attached volume (${DATA_ROOT})"
+echo "==> [3/9] data directories on the attached volume (${DATA_ROOT})"
 for d in caddy_data vaultwarden_data immich_db immich_modelcache \
          immich_thumbs immich_encoded seafile_db seafile_data; do
   mkdir -p "${DATA_ROOT}/${d}"
 done
 echo "    created: ${DATA_ROOT}/{caddy_data,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data}"
 
-echo "==> [4/8] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile})"
+echo "==> [4/9] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile})"
 if [[ -z "${SB_PASSWORD:-}" || "$SB_PASSWORD" == "CHANGEME" ]]; then
   echo "    SB_PASSWORD is not set in ${ENV_FILE} — set it, then re-run." >&2
   exit 1
@@ -72,7 +73,7 @@ mount -t cifs "//${SB_HOST}/${SB_SHARE}" "$tmpmnt" \
 mkdir -p "$tmpmnt/immich" "$tmpmnt/seafile"
 echo "    Storage Box reachable; immich/ and seafile/ present."
 
-echo "==> [5/8] zswap (compress swap pages in RAM, reduce swapfile I/O)"
+echo "==> [5/9] zswap (compress swap pages in RAM, reduce swapfile I/O)"
 # zswap's zpool/compressor are module params, not sysctls: this write covers the
 # running kernel, the cmdline below covers every boot after.
 zswap_params=(enabled=Y zpool=zsmalloc compressor=lzo-rle)
@@ -107,7 +108,7 @@ else
   echo "    written $grub_dropin — zswap settings will persist across reboots."
 fi
 
-echo "==> [6/8] Docker daemon.json (log rotation + live-restore)"
+echo "==> [6/9] Docker daemon.json (log rotation + live-restore)"
 # live-restore keeps containers running while dockerd restarts, so the upgrades
 # step 7 hands to unattended-upgrades do not bounce the stack.
 daemon_json=/etc/docker/daemon.json
@@ -131,7 +132,7 @@ else
   fi
 fi
 
-echo "==> [7/8] Docker upgrade policy (pin ${DOCKER_MAJOR:-?}.x, patch it unattended)"
+echo "==> [7/9] Docker upgrade policy (pin ${DOCKER_MAJOR:-?}.x, patch it unattended)"
 : "${DOCKER_MAJOR:?not set in ${ENV_FILE}}"
 : "${CONTAINERD_MAJOR:?not set in ${ENV_FILE}}"
 codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
@@ -178,7 +179,7 @@ EOF
   echo "    unattended-upgrades may now patch Docker within ${DOCKER_MAJOR}.x."
 fi
 
-echo "==> [8/8] systemd timers (daily backup, weekly restore check, mount watchdog, docker-major check)"
+echo "==> [8/9] systemd timers (daily backup, weekly restore check, mount watchdog, docker-major check)"
 # Refreshes the unit files from the repo, so re-running after an update picks up
 # any change. enable --now is idempotent.
 # pc-notify-failure@.service is a template pulled in by OnFailure= — installed,
@@ -191,6 +192,20 @@ systemctl daemon-reload
 systemctl enable --now pc-backup.timer pc-restore-check.timer pc-mount-watchdog.timer \
   pc-docker-major-check.timer
 echo "    installed + enabled: pc-backup.timer, pc-restore-check.timer, pc-mount-watchdog.timer, pc-docker-major-check.timer"
+
+echo "==> [9/9] journald size cap"
+# journald's default cap is 10% of the filesystem (at most 4 GB); on the root
+# filesystem that space is shared with Docker's images.
+journald_dropin=/etc/systemd/journald.conf.d/size.conf
+journald_want=$'[Journal]\nSystemMaxUse=1G'
+if [[ "$(cat "$journald_dropin" 2>/dev/null)" == "$journald_want" ]]; then
+  echo "    $journald_dropin unchanged."
+else
+  mkdir -p "$(dirname "$journald_dropin")"
+  printf '%s\n' "$journald_want" > "$journald_dropin"
+  systemctl restart systemd-journald
+  echo "    written $journald_dropin and restarted journald."
+fi
 
 echo
 echo "Host prepared. Next:  source scripts/prod.env && docker compose up -d"
