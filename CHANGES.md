@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.4.1] — 2026-09-13
+
+### Changed
+
+- Gallery `v5.5.0` → `v5.6.0`.
+
 ## [1.4.0] — 2026-09-11
 
 ### Added
