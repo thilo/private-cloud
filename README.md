@@ -315,6 +315,36 @@ docker compose up -d vaultwarden   # Vaultwarden picks it up on recreate
 `harden-seafile.sh` reads whichever env file `ENV_FILE` points at, so the
 password is written down **once**. Re-run it after any `SMTP_*` change.
 
+## Stalwart certificates
+
+Caddy fronts Stalwart's HTTP side, but SMTP and IMAP are not HTTP: Stalwart
+publishes those ports itself and terminates TLS on them, so it needs the same
+certificate Caddy holds for `STALWART_DOMAIN`. Caddy stays the only ACME client
+and the pair is copied across, because Caddy writes it readable only by its own
+uid.
+
+Stalwart stores a certificate as a **file path**, so the one-time setup is to
+create the certificate object pointing at the two files, in its admin UI under
+Settings → Certificates, with both fields set to read from a file:
+
+```
+/var/lib/stalwart/tls/mail.crt
+/var/lib/stalwart/tls/mail.key
+```
+
+Then create an API key (Settings → API keys), put it in the env file as
+`STALWART_API_KEY`, and the sync script keeps those files current — it copies
+them and asks the server to reload, which is what makes a renewal take effect:
+
+```bash
+ENV_FILE=.env ./scripts/stalwart-cert-sync.sh      # copy + reload now
+systemctl list-timers pc-stalwart-cert-sync.timer  # next run (default 04:10 daily)
+```
+
+A run with an unchanged certificate exits without touching the server. The copied
+pair lives in its own volume and is deliberately **not** in the backup: the
+script reproduces it from Caddy's TLS material, which `backup.sh` already keeps.
+
 ## Hardening
 
 Every service: `no-new-privileges`, `cap_drop: ALL` plus only the capabilities
@@ -516,9 +546,10 @@ scripts/mount-watchdog.sh          recover a wedged CIFS mount (60s timer)
 scripts/immich-preview-mover.sh    move Immich previews to the box, symlink them back
 scripts/notify-failure.sh          mail an alert when a timer's unit fails
 scripts/harden-seafile.sh          Seahub security settings + worker count (idempotent)
+scripts/stalwart-cert-sync.sh      copy Caddy's mail certificate into Stalwart (daily timer)
 scripts/verify.sh                  the three acceptance tests + an env-file lint
 scripts/vw-test.mjs                Bitwarden-client crypto for the password test
-scripts/systemd/                   units for the backup, restore-check + watchdog timers
+scripts/systemd/                   units for the backup, restore-check, watchdog + cert-sync timers
 AGENTS.md                          conventions + decisions for changing this repo
 CHANGES.md                         release history of this repo
 LICENSE                            MIT — applies to this repo, not to the images

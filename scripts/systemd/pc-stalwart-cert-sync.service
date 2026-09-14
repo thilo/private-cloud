@@ -1,0 +1,14 @@
+[Unit]
+Description=Copy Caddy's mail certificate into Stalwart
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+# No-op unless SMTP_HOST + ALERT_EMAIL are set.
+OnFailure=pc-notify-failure@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/private-cloud
+Environment=ENV_FILE=/root/.env.production
+ExecStart=/opt/private-cloud/scripts/stalwart-cert-sync.sh
+TimeoutStartSec=300

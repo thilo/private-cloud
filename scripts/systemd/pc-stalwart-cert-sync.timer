@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily Stalwart certificate sync
+
+[Timer]
+# Caddy renews 30 days before expiry, so a daily check lands the new certificate
+# on the mail ports well before the old one lapses. Runs after the backup window;
+# a run with nothing to copy exits without touching the server.
+OnCalendar=*-*-* 04:10:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

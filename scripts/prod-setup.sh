@@ -19,7 +19,7 @@
 #   7. pins the Docker engine to ${DOCKER_MAJOR}.x and lets unattended-upgrades
 #      apply that line's patch releases,
 #   8. installs + enables the systemd timers (daily backup, weekly restore check,
-#      mount watchdog, weekly Docker-major check),
+#      mount watchdog, weekly Docker-major check, daily Stalwart cert sync),
 #   9. caps the systemd journal at 1 GB,
 #  10. installs fail2ban and turns off X11, TCP and agent forwarding in sshd.
 set -euo pipefail
@@ -182,19 +182,20 @@ EOF
   echo "    unattended-upgrades may now patch Docker within ${DOCKER_MAJOR}.x."
 fi
 
-echo "==> [8/10] systemd timers (daily backup, weekly restore check, mount watchdog, docker-major check)"
+echo "==> [8/10] systemd timers (daily backup, weekly restore check, mount watchdog, docker-major check, cert sync)"
 # Refreshes the unit files from the repo, so re-running after an update picks up
 # any change. enable --now is idempotent.
 # pc-notify-failure@.service is a template pulled in by OnFailure= — installed,
 # never enabled.
 cp scripts/systemd/pc-backup.* scripts/systemd/pc-restore-check.* \
    scripts/systemd/pc-mount-watchdog.* scripts/systemd/pc-docker-major-check.* \
+   scripts/systemd/pc-stalwart-cert-sync.* \
    scripts/systemd/pc-notify-failure@.service \
    /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now pc-backup.timer pc-restore-check.timer pc-mount-watchdog.timer \
-  pc-docker-major-check.timer
-echo "    installed + enabled: pc-backup.timer, pc-restore-check.timer, pc-mount-watchdog.timer, pc-docker-major-check.timer"
+  pc-docker-major-check.timer pc-stalwart-cert-sync.timer
+echo "    installed + enabled: pc-backup.timer, pc-restore-check.timer, pc-mount-watchdog.timer, pc-docker-major-check.timer, pc-stalwart-cert-sync.timer"
 
 echo "==> [9/10] journald size cap"
 # journald's default cap is 10% of the filesystem (at most 4 GB); on the root
