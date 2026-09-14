@@ -107,18 +107,10 @@ mv -f "$catmp" "$DEST/caddy_data.tar.gz"
 log "dumping stalwart.tar.gz ..."
 SW="$DATA_ROOT/stalwart_data"
 stage="$WORK/stalwart"; mkdir -p "$stage"
-# blobs/ is the Storage Box mount (already on the box, like the Immich originals);
-# data-wal / data-shm belong to the live database and are replaced by the
-# consistent copy below.
-( cd "$SW" && tar cf - --exclude='./blobs' --exclude='./blobs/*' --exclude='./tls' \
-    --exclude='./data' --exclude='./data-wal' --exclude='./data-shm' . ) \
-  | ( cd "$stage" && tar xf - )
-if command -v sqlite3 >/dev/null 2>&1; then
-  sqlite3 "$SW/data" ".backup '$stage/data'" || fail "stalwart: sqlite .backup failed"
-else
-  log "WARN: sqlite3 not installed — copying the store as-is (install sqlite3 for a consistent snapshot)"
-  cp -a "$SW"/data* "$stage"/ 2>/dev/null || true
-fi
+# Only these two: blobs/ is the Storage Box mount (already on the box, like the
+# Immich originals), tls/ is the certificate volume, and data-wal / data-shm are
+# live-database files that .backup folds into its copy.
+sqlite3 "$SW/data" ".backup '$stage/data'" || fail "stalwart: sqlite .backup failed"
 cp -a "$DATA_ROOT/stalwart_etc/config.json" "$stage/config.json" \
   || fail "stalwart: config.json missing (has the web setup been completed?)"
 swtmp="$DEST/.stalwart.tar.gz.partial"

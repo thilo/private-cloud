@@ -30,7 +30,7 @@ set -a; . "$ENV_FILE"; set +a
 
 if [[ $EUID -ne 0 ]]; then echo "Run as root (sudo -E $0)." >&2; exit 1; fi
 
-echo "==> [1/10] cifs-utils + sqlite3 + jq (sqlite3 = consistent Vaultwarden backups)"
+echo "==> [1/10] cifs-utils + sqlite3 + jq (sqlite3 = consistent Vaultwarden + Stalwart backups)"
 need=()
 command -v mount.cifs >/dev/null 2>&1 || need+=(cifs-utils)
 command -v sqlite3   >/dev/null 2>&1 || need+=(sqlite3)

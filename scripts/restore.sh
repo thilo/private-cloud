@@ -120,12 +120,8 @@ if [[ "$CHECK" == 1 ]]; then
   if want stalwart; then
     log "checking Stalwart store ..."
     mkdir -p "$WORK/sw"; tar xzf "$DEST/stalwart.tar.gz" -C "$WORK/sw"
-    if command -v sqlite3 >/dev/null 2>&1; then
-      res=$(sqlite3 "$WORK/sw/data" "PRAGMA integrity_check;" 2>&1 || true)
-      [[ "$res" == "ok" ]] && log "  store integrity_check: ok" || fail "Stalwart store integrity_check: $res"
-    else
-      [[ -s "$WORK/sw/data" ]] && log "  store present (install sqlite3 for a full integrity check)" || fail "store missing in tar"
-    fi
+    res=$(sqlite3 "$WORK/sw/data" "PRAGMA integrity_check;" 2>&1 || true)
+    [[ "$res" == "ok" ]] && log "  store integrity_check: ok" || fail "Stalwart store integrity_check: $res"
   fi
   log "CHECK PASSED — the backup is restorable."
   exit 0
