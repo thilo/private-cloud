@@ -85,13 +85,8 @@ VW="$DATA_ROOT/vaultwarden_data"
 stage="$WORK/vaultwarden_data"; mkdir -p "$stage"
 # Copy everything except the live sqlite files...
 ( cd "$VW" && tar cf - --exclude='db.sqlite3*' . ) | ( cd "$stage" && tar xf - )
-# ...then add a consistent copy of the DB (online backup API if sqlite3 is present).
-if command -v sqlite3 >/dev/null 2>&1; then
-  sqlite3 "$VW/db.sqlite3" ".backup '$stage/db.sqlite3'" || fail "vaultwarden: sqlite .backup failed"
-else
-  log "WARN: sqlite3 not installed — copying db.sqlite3* as-is (install sqlite3 for a consistent snapshot)"
-  cp -a "$VW"/db.sqlite3* "$stage"/ 2>/dev/null || true
-fi
+# ...then add a consistent copy of the DB via the online backup API.
+sqlite3 "$VW/db.sqlite3" ".backup '$stage/db.sqlite3'" || fail "vaultwarden: sqlite .backup failed"
 vwtmp="$DEST/.vaultwarden.tar.gz.partial"
 tar czf "$vwtmp" -C "$stage" . || { rm -f "$vwtmp"; fail "vaultwarden: tar failed"; }
 gzip -t "$vwtmp" 2>/dev/null || { rm -f "$vwtmp"; fail "vaultwarden: gzip verification failed"; }

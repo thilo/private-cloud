@@ -114,12 +114,8 @@ if [[ "$CHECK" == 1 ]]; then
   if want vaultwarden; then
     log "checking Vaultwarden SQLite snapshot ..."
     mkdir -p "$WORK/vw"; tar xzf "$DEST/vaultwarden.tar.gz" -C "$WORK/vw"
-    if command -v sqlite3 >/dev/null 2>&1; then
-      res=$(sqlite3 "$WORK/vw/db.sqlite3" "PRAGMA integrity_check;" 2>&1 || true)
-      [[ "$res" == "ok" ]] && log "  db.sqlite3 integrity_check: ok" || fail "Vaultwarden db.sqlite3 integrity_check: $res"
-    else
-      [[ -s "$WORK/vw/db.sqlite3" ]] && log "  db.sqlite3 present (install sqlite3 for a full integrity check)" || fail "db.sqlite3 missing in tar"
-    fi
+    res=$(sqlite3 "$WORK/vw/db.sqlite3" "PRAGMA integrity_check;" 2>&1 || true)
+    [[ "$res" == "ok" ]] && log "  db.sqlite3 integrity_check: ok" || fail "Vaultwarden db.sqlite3 integrity_check: $res"
   fi
   log "CHECK PASSED — the backup is restorable."
   exit 0
