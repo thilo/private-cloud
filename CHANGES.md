@@ -11,8 +11,9 @@ This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs)
   it publishes the mail ports itself, since those protocols cannot be reverse-proxied.
   Its blobs live on the Storage Box, its store on local SSD.
 - `scripts/stalwart-cert-sync.sh`, on a daily timer — copies Caddy's certificate for
-  the mail host into Stalwart and reloads it. Stalwart terminates TLS on the mail
-  ports itself, so it needs the pair Caddy already renews.
+  the mail host into Stalwart and reloads it, creating the certificate object that
+  points at it on the first run. Stalwart terminates TLS on the mail ports itself,
+  so it needs the pair Caddy already renews.
 
 ### Changed
 

@@ -323,18 +323,15 @@ certificate Caddy holds for `STALWART_DOMAIN`. Caddy stays the only ACME client
 and the pair is copied across, because Caddy writes it readable only by its own
 uid.
 
-Stalwart stores a certificate as a **file path**, so the one-time setup is to
-create the certificate object pointing at the two files, in its admin UI under
-Settings → Certificates, with both fields set to read from a file:
+Stalwart stores a certificate as a **file path**, so the sync script owns the
+whole arrangement: its first run copies the pair in and creates the certificate
+object pointing at it, and every later run refreshes the files and asks the
+server to reload — which is what makes a renewal take effect. Certificates
+configured for anything else are left untouched.
 
-```
-/var/lib/stalwart/tls/mail.crt
-/var/lib/stalwart/tls/mail.key
-```
-
-Then create an API key (Settings → API keys), put it in the env file as
-`STALWART_API_KEY`, and the sync script keeps those files current — it copies
-them and asks the server to reload, which is what makes a renewal take effect:
+The one thing to set up by hand is the credential the script authenticates with:
+create an API key in Stalwart's admin UI and put it in the env file as
+`STALWART_API_KEY`.
 
 ```bash
 ENV_FILE=.env ./scripts/stalwart-cert-sync.sh      # copy + reload now
