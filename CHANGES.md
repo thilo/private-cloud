@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.4.2] — 2026-09-14
+
+### Fixed
+
+- `backup.sh` and `restore.sh` no longer fall back to copying the live SQLite files
+  when `sqlite3` is absent — `prod-setup.sh` installs it, and that copy was not
+  restorable.
+
 ## [1.4.1] — 2026-09-13
 
 ### Changed
