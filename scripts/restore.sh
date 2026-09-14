@@ -5,7 +5,7 @@
 #   sudo -E ./scripts/restore.sh --check                 # verify only, no changes
 #   sudo -E ./scripts/restore.sh --yes                   # restore EVERYTHING
 #   sudo -E ./scripts/restore.sh vaultwarden --yes       # restore one component
-#   components: immich | seafile | vaultwarden | caddy | all   (default: all)
+#   components: immich | seafile | vaultwarden | caddy | stalwart | all  (default: all)
 #
 # The stack must already be up (docker compose up -d) so the database containers
 # exist; this script stops only the services it touches, restores, and starts
@@ -37,12 +37,12 @@ for a in "$@"; do
   case "$a" in
     --check) CHECK=1 ;;
     -y|--yes) ASSUME_YES=1 ;;
-    immich|seafile|vaultwarden|caddy|all) COMPONENTS+=("$a") ;;
+    immich|seafile|vaultwarden|caddy|stalwart|all) COMPONENTS+=("$a") ;;
     *) fail "unknown argument: $a" ;;
   esac
 done
 [[ ${#COMPONENTS[@]} -eq 0 ]] && COMPONENTS=(all)
-printf '%s\n' "${COMPONENTS[@]}" | grep -qx all && COMPONENTS=(immich seafile vaultwarden caddy)
+printf '%s\n' "${COMPONENTS[@]}" | grep -qx all && COMPONENTS=(immich seafile vaultwarden caddy stalwart)
 want() { printf '%s\n' "${COMPONENTS[@]}" | grep -qx "$1"; }
 
 require_running() {
@@ -73,7 +73,7 @@ DEST="$MNT/backups"
 verify_integrity() {
   log "backup manifest:"; sed 's/^/    /' "$DEST/backup-manifest.txt" 2>/dev/null || log "  (no manifest found)"
   local f
-  for f in immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz caddy_data.tar.gz; do
+  for f in immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz caddy_data.tar.gz stalwart.tar.gz; do
     [[ -s "$DEST/$f" ]] || fail "$f missing or empty in backups/"
     gzip -t "$DEST/$f" 2>/dev/null || fail "$f failed gzip integrity check"
   done
@@ -116,6 +116,16 @@ if [[ "$CHECK" == 1 ]]; then
     mkdir -p "$WORK/vw"; tar xzf "$DEST/vaultwarden.tar.gz" -C "$WORK/vw"
     res=$(sqlite3 "$WORK/vw/db.sqlite3" "PRAGMA integrity_check;" 2>&1 || true)
     [[ "$res" == "ok" ]] && log "  db.sqlite3 integrity_check: ok" || fail "Vaultwarden db.sqlite3 integrity_check: $res"
+  fi
+  if want stalwart; then
+    log "checking Stalwart store ..."
+    mkdir -p "$WORK/sw"; tar xzf "$DEST/stalwart.tar.gz" -C "$WORK/sw"
+    if command -v sqlite3 >/dev/null 2>&1; then
+      res=$(sqlite3 "$WORK/sw/data" "PRAGMA integrity_check;" 2>&1 || true)
+      [[ "$res" == "ok" ]] && log "  store integrity_check: ok" || fail "Stalwart store integrity_check: $res"
+    else
+      [[ -s "$WORK/sw/data" ]] && log "  store present (install sqlite3 for a full integrity check)" || fail "store missing in tar"
+    fi
   fi
   log "CHECK PASSED — the backup is restorable."
   exit 0
@@ -172,6 +182,20 @@ if want caddy; then
   tar xzf "$DEST/caddy_data.tar.gz" -C "$d"
   docker compose up -d caddy >/dev/null
   log "  done"
+fi
+
+if want stalwart; then
+  log "restore: Stalwart store + config"
+  d="$DATA_ROOT/stalwart_data"; [[ -d "$d" ]] || fail "$d does not exist"
+  docker compose stop stalwart >/dev/null 2>&1 || true
+  # blobs/ is the Storage Box mount point and tls/ is re-copied from Caddy, so
+  # neither is in the tar and neither may be deleted here.
+  find "$d" -mindepth 1 -maxdepth 1 ! -name blobs ! -name tls -exec rm -rf {} +
+  tar xzf "$DEST/stalwart.tar.gz" -C "$d"
+  mv -f "$d/config.json" "$DATA_ROOT/stalwart_etc/config.json"
+  chown -R 2000:2000 "$d" "$DATA_ROOT/stalwart_etc"   # stalwart runs as uid 2000
+  docker compose up -d stalwart >/dev/null
+  log "  done (run scripts/stalwart-cert-sync.sh to reinstall the mail certificate)"
 fi
 
 log "restore complete for: ${COMPONENTS[*]}"

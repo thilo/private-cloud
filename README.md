@@ -465,7 +465,8 @@ env files hold the secrets — back them up securely and separately.
 
 **Automated backup (`scripts/backup.sh`):** writes _consistent_ dumps of the
 attached-volume state (Immich's Postgres, Seafile's three MariaDB databases,
-Vaultwarden's SQLite + data folder, Caddy's TLS material) to the Storage Box,
+Vaultwarden's SQLite + data folder, Caddy's TLS material, the Stalwart store) to
+the Storage Box,
 verifying each artifact before it replaces the previous one. It keeps a single
 latest set and **relies on the box's free snapshots for dated history** (so
 enable those); the bulk blobs are already on the box and are not re-copied.
@@ -493,7 +494,7 @@ sudo -E ./scripts/restore.sh --yes          # restore everything
 restore is worth nothing, so `--check` also runs on its own weekly timer
 (Sundays 05:00), installed by `prod-setup.sh`. It verifies checksums and gzip,
 loads the Immich dump into a throwaway scratch database, and integrity-checks
-the Vaultwarden SQLite snapshot — changing nothing live:
+the Vaultwarden and Stalwart SQLite snapshots — changing nothing live:
 
 ```bash
 systemctl list-timers pc-restore-check.timer      # next run

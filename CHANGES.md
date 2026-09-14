@@ -3,6 +3,22 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.6.0] — 2026-09-25
+
+### Added
+
+- Stalwart — mail (SMTP + IMAP) plus CalDAV and CardDAV. Caddy fronts its HTTP side;
+  it publishes the mail ports itself, since those protocols cannot be reverse-proxied.
+  Its blobs live on the Storage Box, its store on local SSD.
+- `scripts/stalwart-cert-sync.sh`, on a daily timer — copies Caddy's certificate for
+  the mail host into Stalwart and reloads it. Stalwart terminates TLS on the mail
+  ports itself, so it needs the pair Caddy already renews.
+
+### Changed
+
+- `backup.sh` and `restore.sh` now cover the Stalwart store and its `config.json`.
+  The certificate volume is left out: the sync script reproduces it from Caddy.
+
 ## [1.5.1] — 2026-09-20
 
 ### Fixed
