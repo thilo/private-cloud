@@ -360,6 +360,9 @@ password-strength and login-attempt limits, 2FA availability, bounded
 share/upload links, outgoing mail — and cuts Seahub's worker count to fit the
 memory budget. It is idempotent; edit the script, not the files it generates.
 
+On the host, [`scripts/prod-setup.sh`](scripts/prod-setup.sh) installs fail2ban
+and turns off X11, TCP and agent forwarding in `sshd`.
+
 ## Photos: why the Gallery fork
 
 The photo service runs [Noodle Gallery](https://github.com/open-noodle/gallery)
@@ -502,7 +505,7 @@ docker-compose.setup.yml           overlay: first `up` only — seed admin, open
 caddy/Caddyfile                    reverse proxy + automatic HTTPS
 scripts/init.sh                    generate the env files with fresh secrets
 scripts/prod.env                   source to point compose + scripts at production
-scripts/prod-setup.sh              one-time host prep (packages, swap, dirs, timers)
+scripts/prod-setup.sh              one-time host prep (packages, swap, dirs, timers, sshd)
 scripts/deploy.sh                  copy the working tree to the host and reconcile
 scripts/backup.sh                  consistent backup to the Storage Box (daily timer)
 scripts/restore.sh                 restore from it (--check verifies, weekly timer)

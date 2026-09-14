@@ -19,7 +19,8 @@
 #      apply that line's patch releases,
 #   8. installs + enables the systemd timers (daily backup, weekly restore check,
 #      mount watchdog, weekly Docker-major check),
-#   9. caps the systemd journal at 1 GB.
+#   9. caps the systemd journal at 1 GB,
+#  10. installs fail2ban and turns off X11, TCP and agent forwarding in sshd.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ENV_FILE="${ENV_FILE:-.env.production}"
@@ -28,7 +29,7 @@ set -a; . "$ENV_FILE"; set +a
 
 if [[ $EUID -ne 0 ]]; then echo "Run as root (sudo -E $0)." >&2; exit 1; fi
 
-echo "==> [1/9] cifs-utils + sqlite3 + jq (sqlite3 = consistent Vaultwarden backups)"
+echo "==> [1/10] cifs-utils + sqlite3 + jq (sqlite3 = consistent Vaultwarden backups)"
 need=()
 command -v mount.cifs >/dev/null 2>&1 || need+=(cifs-utils)
 command -v sqlite3   >/dev/null 2>&1 || need+=(sqlite3)
@@ -42,7 +43,7 @@ else
   echo "    installed: ${need[*]}"
 fi
 
-echo "==> [2/9] swap"
+echo "==> [2/10] swap"
 if [[ -n "$(swapon --show --noheadings 2>/dev/null)" ]]; then
   echo "    swap already active — leaving as is."
 else
@@ -54,14 +55,14 @@ else
   echo "    created /swapfile (2G) and enabled it."
 fi
 
-echo "==> [3/9] data directories on the attached volume (${DATA_ROOT})"
+echo "==> [3/10] data directories on the attached volume (${DATA_ROOT})"
 for d in caddy_data vaultwarden_data immich_db immich_modelcache \
          immich_thumbs immich_encoded seafile_db seafile_data; do
   mkdir -p "${DATA_ROOT}/${d}"
 done
 echo "    created: ${DATA_ROOT}/{caddy_data,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data}"
 
-echo "==> [4/9] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile})"
+echo "==> [4/10] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile})"
 if [[ -z "${SB_PASSWORD:-}" || "$SB_PASSWORD" == "CHANGEME" ]]; then
   echo "    SB_PASSWORD is not set in ${ENV_FILE} — set it, then re-run." >&2
   exit 1
@@ -73,7 +74,7 @@ mount -t cifs "//${SB_HOST}/${SB_SHARE}" "$tmpmnt" \
 mkdir -p "$tmpmnt/immich" "$tmpmnt/seafile"
 echo "    Storage Box reachable; immich/ and seafile/ present."
 
-echo "==> [5/9] zswap (compress swap pages in RAM, reduce swapfile I/O)"
+echo "==> [5/10] zswap (compress swap pages in RAM, reduce swapfile I/O)"
 # zswap's zpool/compressor are module params, not sysctls: this write covers the
 # running kernel, the cmdline below covers every boot after.
 zswap_params=(enabled=Y zpool=zsmalloc compressor=lzo-rle)
@@ -108,7 +109,7 @@ else
   echo "    written $grub_dropin — zswap settings will persist across reboots."
 fi
 
-echo "==> [6/9] Docker daemon.json (log rotation + live-restore)"
+echo "==> [6/10] Docker daemon.json (log rotation + live-restore)"
 # live-restore keeps containers running while dockerd restarts, so the upgrades
 # step 7 hands to unattended-upgrades do not bounce the stack.
 daemon_json=/etc/docker/daemon.json
@@ -132,7 +133,7 @@ else
   fi
 fi
 
-echo "==> [7/9] Docker upgrade policy (pin ${DOCKER_MAJOR:-?}.x, patch it unattended)"
+echo "==> [7/10] Docker upgrade policy (pin ${DOCKER_MAJOR:-?}.x, patch it unattended)"
 : "${DOCKER_MAJOR:?not set in ${ENV_FILE}}"
 : "${CONTAINERD_MAJOR:?not set in ${ENV_FILE}}"
 codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
@@ -179,7 +180,7 @@ EOF
   echo "    unattended-upgrades may now patch Docker within ${DOCKER_MAJOR}.x."
 fi
 
-echo "==> [8/9] systemd timers (daily backup, weekly restore check, mount watchdog, docker-major check)"
+echo "==> [8/10] systemd timers (daily backup, weekly restore check, mount watchdog, docker-major check)"
 # Refreshes the unit files from the repo, so re-running after an update picks up
 # any change. enable --now is idempotent.
 # pc-notify-failure@.service is a template pulled in by OnFailure= — installed,
@@ -193,7 +194,7 @@ systemctl enable --now pc-backup.timer pc-restore-check.timer pc-mount-watchdog.
   pc-docker-major-check.timer
 echo "    installed + enabled: pc-backup.timer, pc-restore-check.timer, pc-mount-watchdog.timer, pc-docker-major-check.timer"
 
-echo "==> [9/9] journald size cap"
+echo "==> [9/10] journald size cap"
 # journald's default cap is 10% of the filesystem (at most 4 GB); on the root
 # filesystem that space is shared with Docker's images.
 journald_dropin=/etc/systemd/journald.conf.d/size.conf
@@ -205,6 +206,33 @@ else
   printf '%s\n' "$journald_want" > "$journald_dropin"
   systemctl restart systemd-journald
   echo "    written $journald_dropin and restarted journald."
+fi
+
+echo "==> [10/10] fail2ban + sshd forwarding"
+if command -v fail2ban-client >/dev/null 2>&1; then
+  echo "    fail2ban already installed."
+else
+  apt-get update -qq && apt-get install -y -qq fail2ban
+  echo "    installed fail2ban."
+fi
+# The Debian packaging enables the sshd jail on its own; ban timings are stock.
+systemctl enable --now fail2ban >/dev/null 2>&1
+echo "    fail2ban enabled."
+
+# sshd here carries admin shells and the rsync deploy, none of which forward.
+# sshd takes the FIRST occurrence of a keyword and Ubuntu's sshd_config includes
+# this directory above its own X11Forwarding line, so the drop-in wins.
+sshd_dropin=/etc/ssh/sshd_config.d/99-private-cloud.conf
+sshd_want=$'X11Forwarding no\nAllowTcpForwarding no\nAllowAgentForwarding no'
+if [[ "$(cat "$sshd_dropin" 2>/dev/null)" == "$sshd_want" ]]; then
+  echo "    $sshd_dropin unchanged."
+else
+  mkdir -p "$(dirname "$sshd_dropin")"
+  printf '%s\n' "$sshd_want" > "$sshd_dropin"
+  # Validate before reloading: reload on a rejected file would drop sshd.
+  sshd -t || { rm -f "$sshd_dropin"; echo "    sshd rejected the drop-in — removed." >&2; exit 1; }
+  systemctl reload ssh
+  echo "    written $sshd_dropin and reloaded sshd."
 fi
 
 echo

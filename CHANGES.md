@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.5.0] — 2026-09-14
+
+### Added
+
+- `prod-setup.sh` now installs and enables fail2ban.
+- `prod-setup.sh` now writes an sshd drop-in that turns off X11, TCP and agent
+  forwarding.
+
 ## [1.4.2] — 2026-09-14
 
 ### Fixed
