@@ -48,6 +48,12 @@ volumes:
   immich_db:
   immich_modelcache:
   seafile_db:
+  stalwart_etc: # Stalwart's config.json, written by its own setup
+  stalwart_data: # Stalwart's store: accounts, mail, calendars, contacts
+  # The mail host's certificate, copied from Caddy by scripts/stalwart-cert-sync.sh.
+  # Its own volume, not a directory inside stalwart_data, so the backup can skip it:
+  # the pair is reproducible from caddy_data, which is backed up already.
+  stalwart_tls:
   # Local SSD — latency-sensitive data that must NOT live on the (network) Storage
   # Box: the databases above, plus Seafile's conf/metadata and Immich's hot,
   # constantly-read derivatives.
@@ -63,11 +69,11 @@ volumes:
   # NOT touched by volume-init. nobrl avoids CIFS byte-range-lock errors; the
   # databases live on local SSD precisely so they never need locking over SMB.
   # seal turns on SMB3 transport encryption (requires vers>=3.0, hence
-  # SB_SMB_VERS), set on every mount of this share — the two volumes here plus
+  # SB_SMB_VERS), set on every mount of this share — the three volumes here plus
   # the host mounts in prod-setup.sh / backup.sh / restore.sh. Transport only:
   # data lands on the box in plaintext, so snapshots hold plaintext and a restore
   # needs no key. For at-rest encryption use a Seafile encrypted library.
-  # noexec,nosuid,nodev: both shares hold only blobs, config and avatars, never
+  # noexec,nosuid,nodev: these shares hold only blobs, config and avatars, never
   # executables. Like any driver_opts change, applying these needs a `docker volume
   # rm` + recreate.
   # iocharset is intentionally NOT set: modern CIFS already maps filenames as
@@ -82,7 +88,8 @@ volumes:
   # ~2x win on this workload. The risk (bytes written-but-not-yet-flushed are lost
   # on a host crash / network blip) is acceptable here: the phone is the source of
   # truth and the scheduled Storage Box backup is the floor. Deliberately NOT on
-  # seafile_box, where a half-written commit may have no upstream copy.
+  # seafile_box or stalwart_blobs, where a half-written commit — or a message
+  # already acknowledged to its sender — may have no upstream copy.
   # addr=${SB_HOST} is not redundant beside device:. Docker resolves the device
   # hostname itself and puts the IP in the UNC, leaving the kernel an address where it
   # expects a server name, so a box that moves to a new IP needs the mount recreated.
@@ -100,6 +107,12 @@ volumes:
       type: cifs
       device: "//${SB_HOST}/${SB_SHARE}/seafile"
       o: "username=${SB_USER},password=${SB_PASSWORD},addr=${SB_HOST},uid=8000,gid=8000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,noexec,nosuid,nodev"
+  stalwart_blobs: # Stalwart's blobs: message bodies and attachments (uid 2000)
+    driver: local
+    driver_opts:
+      type: cifs
+      device: "//${SB_HOST}/${SB_SHARE}/stalwart"
+      o: "username=${SB_USER},password=${SB_PASSWORD},addr=${SB_HOST},uid=2000,gid=2000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,noexec,nosuid,nodev"
 
 services:
   # --------------------------------------------------------------- ingress --
@@ -125,6 +138,7 @@ services:
       IMMICH_DOMAIN: ${IMMICH_DOMAIN}
       VAULTWARDEN_DOMAIN: ${VAULTWARDEN_DOMAIN}
       SEAFILE_DOMAIN: ${SEAFILE_DOMAIN}
+      STALWART_DOMAIN: ${STALWART_DOMAIN}
       CADDY_TLS: ${CADDY_TLS}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -159,13 +173,16 @@ services:
         condition: service_started
       seafile-server:
         condition: service_started
+      stalwart:
+        condition: service_started
 
   # ------------------------------------------------------------ vaultwarden --
   # One-shot chowner so the non-root services own their LOCAL data volumes before
   # they start: vaultwarden + immich run as uid 1000, caddy as uid 1001 (a distinct
   # uid so a Caddy compromise can't touch the other services' volumes), seafile's
   # daemons as uid 8000 (Seafile's NON_ROOT mode refuses to start unless /shared is
-  # writable). The CIFS Storage Box volume (immich_data) is excluded — its ownership
+  # writable), stalwart as uid 2000 (the image's own user, which writes both its
+  # config and its store). The CIFS Storage Box volume (immich_data) is excluded — its ownership
   # comes from the mount's uid=, and CIFS can't be chown'd anyway.
   volume-init:
     image: alpine:3.20
@@ -174,7 +191,7 @@ services:
       [
         "sh",
         "-c",
-        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs",
+        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs && chown -R 2000:2000 /stalwart-etc /stalwart-data /stalwart-tls",
       ]
     volumes:
       - vaultwarden_data:/vw
@@ -184,6 +201,9 @@ services:
       - caddy_data:/caddy-data
       - seafile_data:/seafile
       - seafile_logs:/seafile-logs
+      - stalwart_etc:/stalwart-etc
+      - stalwart_data:/stalwart-data
+      - stalwart_tls:/stalwart-tls
     restart: "no"
     security_opt:
       - no-new-privileges:true
@@ -246,6 +266,68 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  # --------------------------------------------------------------- stalwart --
+  # Mail (SMTP + IMAP) and CalDAV/CardDAV in one server. The only service besides
+  # Caddy that publishes ports: mail protocols are not HTTP, so the proxy cannot
+  # front them. Its HTTP side — web admin, CalDAV, CardDAV — does go through
+  # Caddy, over the plain listener below.
+  #
+  # Nothing is configured from this file: the first start comes up in bootstrap
+  # mode, and the setup done there writes config.json (the store location) and
+  # keeps everything else — domains, listeners, accounts — inside the store.
+  stalwart:
+    image: ${STALWART_IMAGE}
+    container_name: pc-stalwart
+    restart: *restart
+    # Idles at ~12M before setup; the ceiling is headroom for the store's caches.
+    mem_limit: 512m
+    pids_limit: 128
+    user: "2000:2000"
+    ports:
+      - "25:25" # SMTP (incoming mail)
+      - "465:465" # submission, implicit TLS
+      - "993:993" # IMAP
+    environment:
+      TZ: ${TZ}
+      # Both are overrides of what the web setup stored, so the name Stalwart
+      # answers with follows this file rather than whatever was typed once into
+      # the setup form. PUBLIC_URL is what OAuth/JMAP discovery documents publish,
+      # so it carries the port in local runs.
+      STALWART_HOSTNAME: ${STALWART_DOMAIN}
+      STALWART_PUBLIC_URL: ${STALWART_URL}
+      # The bootstrap administrator (STALWART_RECOVERY_ADMIN) is intentionally NOT
+      # here: it is only read while the server has no config.json, so keeping it
+      # would leave a credential in `docker inspect pc-stalwart` forever. It is
+      # supplied transiently by docker-compose.setup.yml instead.
+    volumes:
+      - stalwart_etc:/etc/stalwart
+      # Metadata (the SQLite data store) on local SSD; message bodies on the
+      # Storage Box, the same split Immich and Seafile use. Nested under the data
+      # dir so Stalwart's blob path stays inside its own tree.
+      - stalwart_data:/var/lib/stalwart
+      - stalwart_blobs:/var/lib/stalwart/blobs
+      # Certificate for the mail ports. Caddy cannot front SMTP/IMAP, so Stalwart
+      # serves them itself using the pair Caddy obtained; its certificate object
+      # points at these two files.
+      - stalwart_tls:/var/lib/stalwart/tls
+    networks:
+      - proxy
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    read_only: true
+    # noexec/nosuid/nodev: /tmp is scratch; config and store are on the volumes.
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
+    cap_drop: [ALL]
+    # NET_BIND_SERVICE: the image's stalwart binary carries this as a *file*
+    # capability, so it must stay in the bounding set — dropping it makes the exec
+    # itself fail ("operation not permitted"), not just the bind to 25/465/587/993.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    # Healthcheck: the image's own (/healthz/live).
 
   # ----------------------------------------------------------------- immich --
   immich-db:

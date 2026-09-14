@@ -9,7 +9,8 @@
 #   1. installs cifs-utils (needed to mount the Storage Box over SMB/CIFS),
 #   2. adds a 2 GB swap file if the host has none (safety net on a 4 GB box),
 #   3. creates the per-volume directories on the attached volume (${DATA_ROOT}),
-#   4. creates + validates the immich/ and seafile/ subfolders on the Storage Box
+#   4. creates + validates the immich/, seafile/ and stalwart/ subfolders on the
+#      Storage Box
 #      (a CIFS mount of a missing subpath fails, so they must exist first),
 #   5. enables zswap with the zsmalloc pool and the lzo-rle compressor
 #      (compresses swap pages in RAM before hitting the swapfile, cutting disk
@@ -57,12 +58,13 @@ fi
 
 echo "==> [3/10] data directories on the attached volume (${DATA_ROOT})"
 for d in caddy_data vaultwarden_data immich_db immich_modelcache \
-         immich_thumbs immich_encoded seafile_db seafile_data; do
+         immich_thumbs immich_encoded seafile_db seafile_data \
+         stalwart_etc stalwart_data; do
   mkdir -p "${DATA_ROOT}/${d}"
 done
-echo "    created: ${DATA_ROOT}/{caddy_data,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data}"
+echo "    created: ${DATA_ROOT}/{caddy_data,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data,stalwart_etc,stalwart_data}"
 
-echo "==> [4/10] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile})"
+echo "==> [4/10] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile,stalwart})"
 if [[ -z "${SB_PASSWORD:-}" || "$SB_PASSWORD" == "CHANGEME" ]]; then
   echo "    SB_PASSWORD is not set in ${ENV_FILE} — set it, then re-run." >&2
   exit 1
@@ -71,8 +73,8 @@ tmpmnt="$(mktemp -d)"
 trap 'umount "$tmpmnt" 2>/dev/null || true; rmdir "$tmpmnt" 2>/dev/null || true' EXIT
 mount -t cifs "//${SB_HOST}/${SB_SHARE}" "$tmpmnt" \
   -o "username=${SB_USER},password=${SB_PASSWORD},vers=${SB_SMB_VERS},seal"
-mkdir -p "$tmpmnt/immich" "$tmpmnt/seafile"
-echo "    Storage Box reachable; immich/ and seafile/ present."
+mkdir -p "$tmpmnt/immich" "$tmpmnt/seafile" "$tmpmnt/stalwart"
+echo "    Storage Box reachable; immich/, seafile/ and stalwart/ present."
 
 echo "==> [5/10] zswap (compress swap pages in RAM, reduce swapfile I/O)"
 # zswap's zpool/compressor are module params, not sysctls: this write covers the

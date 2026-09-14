@@ -17,11 +17,13 @@ volumes:
 
 services:
   # Pre-create the per-app subfolders the CIFS volumes mount (backup/immich,
-  # backup/seafile). On a real Storage Box you create these once over SFTP/SMB.
+  # backup/seafile, backup/stalwart). On a real Storage Box you create these once
+  # over SFTP/SMB.
   storagebox-init:
     image: alpine:3.20
     container_name: pc-storagebox-init
-    command: ["sh", "-c", "mkdir -p /s/immich /s/seafile && chmod -R 0777 /s"]
+    command:
+      ["sh", "-c", "mkdir -p /s/immich /s/seafile /s/stalwart && chmod -R 0777 /s"]
     volumes:
       - storagebox_data:/s
     restart: "no"
@@ -75,6 +77,10 @@ services:
       storagebox:
         condition: service_healthy
   seafile-server:
+    depends_on:
+      storagebox:
+        condition: service_healthy
+  stalwart:
     depends_on:
       storagebox:
         condition: service_healthy

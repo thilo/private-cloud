@@ -1,6 +1,7 @@
 # Production overlay — pins the latency-sensitive volumes onto the attached
 # block volume (a Hetzner Volume), keeps temp/logs on the host's root disk, and
-# leaves the bulk-blob CIFS volumes (immich_data, seafile_box) exactly as the
+# leaves the bulk-blob CIFS volumes (immich_data, seafile_box, stalwart_blobs)
+# exactly as the
 # base file defines them (they already target the real Storage Box via ${SB_*}).
 #
 # Use it together with the base file and the production env file, e.g.:
@@ -23,7 +24,8 @@
 #                              rate limits) + the ML model cache.
 #   on the host root disk   -> seafile_logs (chatty per-request logs) stays a
 #                              plain named volume; tmpfs handles scratch.
-#   on the Storage Box      -> immich_data, seafile_box (defined in the base file).
+#   on the Storage Box      -> immich_data, seafile_box, stalwart_blobs (defined
+#                              in the base file).
 
 name: private-cloud
 
@@ -52,3 +54,9 @@ volumes:
   seafile_data:
     driver: local
     driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/seafile_data" }
+  stalwart_etc:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/stalwart_etc" }
+  stalwart_data:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/stalwart_data" }

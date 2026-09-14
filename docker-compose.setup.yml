@@ -29,6 +29,14 @@ services:
       # Root password used once to create the seafile DBs/users on first boot.
       INIT_SEAFILE_MYSQL_ROOT_PASSWORD: ${SEAFILE_DB_ROOT_PASSWORD}
 
+  stalwart:
+    environment:
+      # Pins the administrator that Stalwart's web setup runs under, so the first
+      # `up` does not print a fresh random password to the log on every restart
+      # until setup is finished. Only read while there is no config.json yet;
+      # once setup writes one, the permanent administrator it provisions applies.
+      STALWART_RECOVERY_ADMIN: "admin:${STALWART_ADMIN_PASSWORD}"
+
   vaultwarden:
     environment:
       # Vaultwarden seeds no admin from env (registration is the only path to a

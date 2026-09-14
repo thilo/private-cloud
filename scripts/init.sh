@@ -54,8 +54,9 @@ set_kv "$ENV_FILE" SEAFILE_REDIS_PASSWORD   "$(gen)"
 set_kv "$ENV_FILE" SEAFILE_JWT_KEY          "$(gen 44)"
 [[ "$GEN_SB_PASSWORD" == "1" ]] && set_kv "$ENV_FILE" SB_PASSWORD "$(gen)"
 
-# Setup-only secrets -> the setup file: the initial Seafile admin password.
-set_kv "$SETUP_FILE" SEAFILE_ADMIN_PASSWORD "$(gen 24)"
+# Setup-only secrets -> the setup file: the initial admin passwords.
+set_kv "$SETUP_FILE" SEAFILE_ADMIN_PASSWORD  "$(gen 24)"
+set_kv "$SETUP_FILE" STALWART_ADMIN_PASSWORD "$(gen 24)"
 
 chmod 600 "$ENV_FILE" "$SETUP_FILE"
 

@@ -10,6 +10,8 @@ Self-hosted replacements for the usual cloud subscriptions, in one
   (see [Photos: why the Gallery fork](#photos-why-the-gallery-fork))
 - **Vaultwarden** — password manager with TOTP 2FA, compatible with the
   official **Bitwarden** apps and extensions
+- **Stalwart** — mail (SMTP + IMAP) with CalDAV and CardDAV, so calendars and
+  contacts sync from the same server
 
 behind a single **Caddy** reverse proxy with automatic HTTPS. The same base
 compose file runs locally and on a real server.
@@ -25,7 +27,7 @@ what the stack does and how to run it.
   block volumes — while databases and hot caches stay on local SSD. A 1 TB
   setup runs under €10/month.
 - **Hardened containers.** `cap_drop: ALL`, `no-new-privileges` and pinned
-  images everywhere; 9 of 10 services run a **read-only root filesystem**, most
+  images everywhere; 11 of 12 services run a **read-only root filesystem**, most
   non-root. Databases sit on egress-blocked internal networks, only Caddy
   publishes host ports, and admin passwords stay out of the runtime container
   environment.
@@ -398,12 +400,13 @@ never include human-account passwords:
 | ------------------- | -------------------------------------------- | --------------------------------------------------- |
 | File (local / prod) | `.env` / `/root/.env.production`             | `.env.setup` / `/root/.env.production.setup`        |
 | Loaded by           | Compose, on **every** `up`                   | only `init.sh`, `verify.sh`, and the **first** `up` |
-| Contents            | DB / Redis / Storage Box / JWT machine creds | the first Seafile admin account                     |
+| Contents            | DB / Redis / Storage Box / JWT machine creds | the first Seafile admin + Stalwart's setup admin    |
 
 `scripts/init.sh` generates both (each `chmod 600`, both gitignored). The base
 `docker-compose.yml` never references the setup file, so a normal `up` puts no
-admin credentials into any container: Seafile's first-boot seeding vars live in
-`docker-compose.setup.yml`, applied only on the first `up`. That overlay also
+admin credentials into any container: Seafile's first-boot seeding vars and the
+administrator Stalwart's web setup runs under live in `docker-compose.setup.yml`,
+applied only on the first `up`. That overlay also
 opens Vaultwarden's signups and web vault for that one run. Immich and
 Vaultwarden admins are registered in the browser, so they appear in neither
 file.
