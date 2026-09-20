@@ -221,12 +221,14 @@ fi
 #            prefix, so a handshake against this exact value must upgrade: 101.
 #   inner  — where seaf-server posts events, so it is checked from inside the
 #            container.
+# A successful upgrade leaves the socket open, so that curl always runs its full
+# timeout.
 ns_pub=$(docker exec pc-seafile printenv NOTIFICATION_SERVER_URL 2>/dev/null | tr -d '\r')
 ns_inner=$(docker exec pc-seafile printenv INNER_NOTIFICATION_SERVER_URL 2>/dev/null | tr -d '\r')
 if [[ -z "$ns_pub" || -z "$ns_inner" ]]; then
   no "notification server URLs unset in pc-seafile — no address for the browser, and events go to 127.0.0.1"
 else
-  ns_code=$(sf --http1.1 -m 10 -o /dev/null -w '%{http_code}' \
+  ns_code=$(sf --http1.1 -m 5 -o /dev/null -w '%{http_code}' \
     -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==' \
     "$ns_pub" 2>/dev/null)
