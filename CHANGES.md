@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.5.1] — 2026-09-20
+
+### Fixed
+
+- Seafile now sets `NOTIFICATION_SERVER_URL` and `INNER_NOTIFICATION_SERVER_URL`;
+  without them real-time push never worked and clients silently fell back to
+  polling.
+
+### Changed
+
+- `verify.sh` now completes a websocket upgrade on the URL Seafile advertises and
+  checks the sidecar from inside the server, instead of pinging it through Caddy.
+
 ## [1.5.0] — 2026-09-14
 
 ### Added

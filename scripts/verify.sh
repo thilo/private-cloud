@@ -3,7 +3,8 @@
 #   1. Vaultwarden — store & retrieve a password (Bitwarden client crypto) + 2FA
 #   2. Immich     — sync a photo (same REST API the iOS app uses)
 #   3. Seafile    — sync a local file (same Web API the desktop/iOS clients use)
-#                   + notification server reachable (real-time push) via /notification
+#                   + real-time push: a websocket upgrade on the URL Seafile
+#                     advertises, and the sidecar reachable from the server
 set -uo pipefail
 cd "$(dirname "$0")/.."
 # Runtime config lives in the runtime env file; the Seafile admin secret lives in
@@ -213,14 +214,34 @@ else
   info "client-side encrypted libraries (the reliable iOS E2EE) are created in the app"
 fi
 
-# Notification server (real-time push) — unauthenticated health endpoint that Caddy
-# proxies at /notification/ping. A pong proves Caddy strips the /notification prefix
-# and reaches the sidecar on :8083 (the same websocket path the clients use).
-np=$(sf "${SF_BASE}/notification/ping" 2>/dev/null)
-if [[ "$np" == *pong* ]]; then
-  ok "notification server reachable through Caddy (/notification/ping → pong)"
+# Notification server (real-time push), tested at both ends against the values the
+# container carries, since those are what Seafile hands out:
+#   public — what the browser dials. The sidecar serves the websocket at its root
+#            (/events is the event POST, /ping is health), and Caddy strips the
+#            prefix, so a handshake against this exact value must upgrade: 101.
+#   inner  — where seaf-server posts events, so it is checked from inside the
+#            container.
+ns_pub=$(docker exec pc-seafile printenv NOTIFICATION_SERVER_URL 2>/dev/null | tr -d '\r')
+ns_inner=$(docker exec pc-seafile printenv INNER_NOTIFICATION_SERVER_URL 2>/dev/null | tr -d '\r')
+if [[ -z "$ns_pub" || -z "$ns_inner" ]]; then
+  no "notification server URLs unset in pc-seafile — no address for the browser, and events go to 127.0.0.1"
 else
-  no "notification server ping failed through Caddy: ${np:-<empty>}"
+  ns_code=$(sf --http1.1 -m 10 -o /dev/null -w '%{http_code}' \
+    -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==' \
+    "$ns_pub" 2>/dev/null)
+  if [[ "$ns_code" == 101 ]]; then
+    ok "websocket upgrade on the advertised URL ($ns_pub)"
+  else
+    no "websocket upgrade on $ns_pub returned ${ns_code:-<none>}, want 101"
+  fi
+
+  ns_pong=$(docker exec pc-seafile curl -sS -m 5 "${ns_inner%/}/ping" 2>/dev/null)
+  if [[ "$ns_pong" == *pong* ]]; then
+    ok "Seafile reaches the sidecar at $ns_inner"
+  else
+    no "Seafile cannot reach the sidecar at $ns_inner — its events are dropped"
+  fi
 fi
 
 # ----------------------------------------------------------------- summary --

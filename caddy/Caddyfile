@@ -68,7 +68,9 @@
 	tls {$CADDY_TLS}
 	import security_headers
 
-	# Real-time notification websocket; handle_path strips the /notification prefix.
+	# Real-time notification sidecar, sharing this domain with Seahub. It serves
+	# its routes at the root (websocket on /, plus /events and /ping), so
+	# handle_path strips the prefix this mount adds.
 	handle_path /notification* {
 		reverse_proxy notification-server:8083
 	}

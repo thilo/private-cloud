@@ -642,6 +642,10 @@ services:
       SEAFILE_LOG_TO_STDOUT: "false"
       ENABLE_GO_FILESERVER: "true"
       ENABLE_NOTIFICATION_SERVER: "true"
+      # The address the browser dials — the Caddyfile's /notification route — and
+      # the one seaf-server posts its events to.
+      NOTIFICATION_SERVER_URL: "https://${SEAFILE_DOMAIN}:${HTTPS_PORT}/notification"
+      INNER_NOTIFICATION_SERVER_URL: "http://notification-server:8083"
       # Optional extras kept off to stay lean (file sync + E2EE only).
       ENABLE_SEADOC: "false"
       ENABLE_SEAFILE_AI: "false"
@@ -692,8 +696,8 @@ services:
       start_period: 180s
 
   # ----------------------------------------------------- notification server --
-  # The service key must stay `notification-server`: seafile-server's
-  # INNER_NOTIFICATION_SERVER_URL defaults to http://notification-server:8083.
+  # The service key must stay `notification-server`: it is the host in
+  # seafile-server's INNER_NOTIFICATION_SERVER_URL.
   notification-server:
     image: ${NOTIFICATION_SERVER_IMAGE}
     container_name: pc-notification
