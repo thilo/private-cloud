@@ -181,15 +181,14 @@ if want caddy; then
 fi
 
 if want stalwart; then
-  log "restore: Stalwart store + config"
+  log "restore: Stalwart store"
   d="$DATA_ROOT/stalwart_data"; [[ -d "$d" ]] || fail "$d does not exist"
   docker compose stop stalwart >/dev/null 2>&1 || true
   # blobs/ is the Storage Box mount point and tls/ is re-copied from Caddy, so
   # neither is in the tar and neither may be deleted here.
   find "$d" -mindepth 1 -maxdepth 1 ! -name blobs ! -name tls -exec rm -rf {} +
   tar xzf "$DEST/stalwart.tar.gz" -C "$d"
-  mv -f "$d/config.json" "$DATA_ROOT/stalwart_etc/config.json"
-  chown -R 2000:2000 "$d" "$DATA_ROOT/stalwart_etc"   # stalwart runs as uid 2000
+  chown -R 2000:2000 "$d"   # stalwart runs as uid 2000
   docker compose up -d stalwart >/dev/null
   log "  done (run scripts/stalwart-cert-sync.sh to reinstall the mail certificate)"
 fi

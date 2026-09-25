@@ -11,7 +11,7 @@
 #   - Seafile MariaDB       -> mariadb-dump --single-transaction of all 3 DBs, gzip
 #   - Vaultwarden           -> SQLite .backup (consistent) + data folder, tar.gz
 #   - Caddy TLS material    -> tar.gz (so a restore doesn't re-hit Let's Encrypt)
-#   - Stalwart mail/DAV     -> SQLite .backup of the store + config.json, tar.gz
+#   - Stalwart mail/DAV     -> SQLite .backup of the store, tar.gz
 # Each artifact is written to a .partial file, verified, then atomically renamed,
 # so a snapshot taken mid-run never captures a half-written file. A manifest with
 # sizes + sha256 is written last as the completion marker.
@@ -99,20 +99,18 @@ tar czf "$catmp" -C "$DATA_ROOT/caddy_data" . || { rm -f "$catmp"; fail "caddy: 
 gzip -t "$catmp" 2>/dev/null || { rm -f "$catmp"; fail "caddy: gzip verification failed"; }
 mv -f "$catmp" "$DEST/caddy_data.tar.gz"
 
-# 5. Stalwart — consistent SQLite snapshot of the store, plus the config.json that
-# names it. The store holds the accounts, mail, calendars and the DKIM private
-# keys, so losing it means re-publishing DNS. stalwart_tls is deliberately absent:
+# 5. Stalwart — consistent SQLite snapshot of the store. It holds the accounts,
+# mail, calendars and the DKIM private keys, so losing it means re-publishing DNS.
+# config.json is in the repo. stalwart_tls is deliberately absent:
 # that pair is reproducible from the Caddy material above via
 # scripts/stalwart-cert-sync.sh.
 log "dumping stalwart.tar.gz ..."
 SW="$DATA_ROOT/stalwart_data"
 stage="$WORK/stalwart"; mkdir -p "$stage"
-# Only these two: blobs/ is the Storage Box mount (already on the box, like the
+# Only the store: blobs/ is the Storage Box mount (already on the box, like the
 # Immich originals), tls/ is the certificate volume, and data-wal / data-shm are
 # live-database files that .backup folds into its copy.
 sqlite3 "$SW/data" ".backup '$stage/data'" || fail "stalwart: sqlite .backup failed"
-cp -a "$DATA_ROOT/stalwart_etc/config.json" "$stage/config.json" \
-  || fail "stalwart: config.json missing (has the web setup been completed?)"
 swtmp="$DEST/.stalwart.tar.gz.partial"
 tar czf "$swtmp" -C "$stage" . || { rm -f "$swtmp"; fail "stalwart: tar failed"; }
 gzip -t "$swtmp" 2>/dev/null || { rm -f "$swtmp"; fail "stalwart: gzip verification failed"; }

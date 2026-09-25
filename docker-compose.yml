@@ -48,7 +48,6 @@ volumes:
   immich_db:
   immich_modelcache:
   seafile_db:
-  stalwart_etc: # Stalwart's config.json, written by its own setup
   stalwart_data: # Stalwart's store: accounts, mail, calendars, contacts
   # The mail host's certificate, copied from Caddy by scripts/stalwart-cert-sync.sh.
   # Its own volume, not a directory inside stalwart_data, so the backup can skip it:
@@ -181,8 +180,8 @@ services:
   # they start: vaultwarden + immich run as uid 1000, caddy as uid 1001 (a distinct
   # uid so a Caddy compromise can't touch the other services' volumes), seafile's
   # daemons as uid 8000 (Seafile's NON_ROOT mode refuses to start unless /shared is
-  # writable), stalwart as uid 2000 (the image's own user, which writes both its
-  # config and its store). The CIFS Storage Box volume (immich_data) is excluded — its ownership
+  # writable), stalwart as uid 2000 (the image's own user, which writes its
+  # store). The CIFS Storage Box volume (immich_data) is excluded — its ownership
   # comes from the mount's uid=, and CIFS can't be chown'd anyway.
   volume-init:
     image: alpine:3.20
@@ -191,7 +190,7 @@ services:
       [
         "sh",
         "-c",
-        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs && chown -R 2000:2000 /stalwart-etc /stalwart-data /stalwart-tls",
+        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs && chown -R 2000:2000 /stalwart-data /stalwart-tls",
       ]
     volumes:
       - vaultwarden_data:/vw
@@ -201,7 +200,6 @@ services:
       - caddy_data:/caddy-data
       - seafile_data:/seafile
       - seafile_logs:/seafile-logs
-      - stalwart_etc:/stalwart-etc
       - stalwart_data:/stalwart-data
       - stalwart_tls:/stalwart-tls
     restart: "no"
@@ -273,9 +271,8 @@ services:
   # front them. Its HTTP side — web admin, CalDAV, CardDAV — does go through
   # Caddy, over the plain listener below.
   #
-  # Nothing is configured from this file: the first start comes up in bootstrap
-  # mode, and the setup done there writes config.json (the store location) and
-  # keeps everything else — domains, listeners, accounts — inside the store.
+  # config.json only names the store; everything else — domains, listeners,
+  # accounts — lives inside the store and is declared by scripts/stalwart-apply.sh.
   stalwart:
     image: ${STALWART_IMAGE}
     container_name: pc-stalwart
@@ -290,18 +287,16 @@ services:
       - "993:993" # IMAP
     environment:
       TZ: ${TZ}
-      # Both are overrides of what the web setup stored, so the name Stalwart
-      # answers with follows this file rather than whatever was typed once into
-      # the setup form. PUBLIC_URL is what OAuth/JMAP discovery documents publish,
-      # so it carries the port in local runs.
+      # Both override what the store holds, so the name Stalwart answers with
+      # follows this file. PUBLIC_URL is what OAuth/JMAP discovery documents
+      # publish, so it carries the port in local runs.
       STALWART_HOSTNAME: ${STALWART_DOMAIN}
       STALWART_PUBLIC_URL: ${STALWART_URL}
-      # The bootstrap administrator (STALWART_RECOVERY_ADMIN) is intentionally NOT
-      # here: it is only read while the server has no config.json, so keeping it
-      # would leave a credential in `docker inspect pc-stalwart` forever. It is
-      # supplied transiently by docker-compose.setup.yml instead.
+      # Recovery mode and its administrator are supplied transiently by
+      # docker-compose.setup.yml, so no credential stays in
+      # `docker inspect pc-stalwart`.
     volumes:
-      - stalwart_etc:/etc/stalwart
+      - ./stalwart/config.json:/etc/stalwart/config.json:ro
       # Metadata (the SQLite data store) on local SSD; message bodies on the
       # Storage Box, the same split Immich and Seafile use. Nested under the data
       # dir so Stalwart's blob path stays inside its own tree.

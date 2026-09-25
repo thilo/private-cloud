@@ -58,11 +58,10 @@ fi
 
 echo "==> [3/10] data directories on the attached volume (${DATA_ROOT})"
 for d in caddy_data vaultwarden_data immich_db immich_modelcache \
-         immich_thumbs immich_encoded seafile_db seafile_data \
-         stalwart_etc stalwart_data; do
+         immich_thumbs immich_encoded seafile_db seafile_data stalwart_data; do
   mkdir -p "${DATA_ROOT}/${d}"
 done
-echo "    created: ${DATA_ROOT}/{caddy_data,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data,stalwart_etc,stalwart_data}"
+echo "    created: ${DATA_ROOT}/{caddy_data,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data,stalwart_data}"
 
 echo "==> [4/10] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile,stalwart})"
 if [[ -z "${SB_PASSWORD:-}" || "$SB_PASSWORD" == "CHANGEME" ]]; then

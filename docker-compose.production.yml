@@ -54,9 +54,6 @@ volumes:
   seafile_data:
     driver: local
     driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/seafile_data" }
-  stalwart_etc:
-    driver: local
-    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/stalwart_etc" }
   stalwart_data:
     driver: local
     driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/stalwart_data" }

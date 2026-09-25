@@ -31,10 +31,11 @@ services:
 
   stalwart:
     environment:
-      # Pins the administrator that Stalwart's web setup runs under, so the first
-      # `up` does not print a fresh random password to the log on every restart
-      # until setup is finished. Only read while there is no config.json yet;
-      # once setup writes one, the permanent administrator it provisions applies.
+      # Recovery mode serves only the HTTP API, as this administrator, so
+      # scripts/stalwart-apply.sh can declare the real configuration into an
+      # empty store. The next plain `up` restarts Stalwart normally, where the
+      # administrator the script declared applies.
+      STALWART_RECOVERY_MODE: "1"
       STALWART_RECOVERY_ADMIN: "admin:${STALWART_ADMIN_PASSWORD}"
 
   vaultwarden:
