@@ -14,9 +14,9 @@
 #   sudo -E ./scripts/stalwart-cert-sync.sh          # production
 #
 # Scheduled as a daily timer (scripts/systemd/pc-stalwart-cert-sync.*). The first
-# run also creates the certificate object that points at the two files, so the
-# only thing to set up by hand is STALWART_API_KEY (README "Stalwart
-# certificates"). Certificates configured for anything else are left alone.
+# run also creates the certificate object that points at the two files. It
+# authenticates as the `certsync` account that scripts/stalwart-apply.sh declares.
+# Certificates configured for anything else are left alone.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ENV_FILE="${ENV_FILE:-.env.production}"
@@ -27,14 +27,14 @@ log()  { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
 [[ -n "${STALWART_DOMAIN:-}" ]] || fail "STALWART_DOMAIN is not set in $ENV_FILE"
-[[ -n "${STALWART_API_KEY:-}" && "$STALWART_API_KEY" != "CHANGEME" ]] \
-  || fail "STALWART_API_KEY is not set in $ENV_FILE (create one in Stalwart under Settings -> API keys)"
+[[ -n "${STALWART_CERTSYNC_PASSWORD:-}" && "$STALWART_CERTSYNC_PASSWORD" != "CHANGEME" ]] \
+  || fail "STALWART_CERTSYNC_PASSWORD is not set in $ENV_FILE"
 
 TLS_DIR=/var/lib/stalwart/tls
 
-# The key reaches the container through the environment, never the command line.
+# The password reaches the container through the environment, never the command line.
 sw_api() {
-  docker exec -i -e "SW_KEY=$STALWART_API_KEY" pc-stalwart sh -c "$1"
+  SW_PW="$STALWART_CERTSYNC_PASSWORD" docker exec -i -e SW_PW pc-stalwart sh -c "$1"
 }
 
 # Caddy files its certificates under an issuer-named directory (`local` for its
@@ -46,13 +46,13 @@ crt_path="$(docker exec pc-caddy sh -c \
 [[ -n "$crt_path" ]] || fail "Caddy has no certificate for ${STALWART_DOMAIN} yet"
 
 jmap() { # request body on stdin, response on stdout
-  sw_api 'curl -sf -X POST -H "Authorization: Bearer $SW_KEY" -H "Content-Type: application/json" --data-binary @- http://127.0.0.1:8080/jmap'
+  sw_api 'curl -sf -X POST -u "certsync:$SW_PW" -H "Content-Type: application/json" --data-binary @- http://127.0.0.1:8080/jmap'
 }
 
 # Settings objects live under the primary account of the JMAP session.
-account="$(sw_api 'curl -sf -H "Authorization: Bearer $SW_KEY" http://127.0.0.1:8080/jmap/session' \
+account="$(sw_api 'curl -sf -u "certsync:$SW_PW" http://127.0.0.1:8080/jmap/session' \
   | sed -n 's/.*"urn:stalwart:jmap":"\([^"]*\)".*/\1/p')"
-[[ -n "$account" ]] || fail "could not read the JMAP session — is STALWART_API_KEY still valid?"
+[[ -n "$account" ]] || fail "could not read the JMAP session — has scripts/stalwart-apply.sh run?"
 
 new_crt="$(docker exec pc-caddy cat "$crt_path")"
 old_crt="$(docker exec pc-stalwart cat "$TLS_DIR/mail.crt" 2>/dev/null || true)"
