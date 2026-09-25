@@ -8,17 +8,18 @@ This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs)
 ### Added
 
 - Stalwart — mail (SMTP + IMAP) plus CalDAV and CardDAV. Caddy fronts its HTTP side;
-  it publishes the mail ports itself, since those protocols cannot be reverse-proxied.
-  Its blobs live on the Storage Box, its store on local SSD.
+  Stalwart publishes the mail ports itself. Its blobs live on the Storage Box, its
+  store on local SSD.
+- `scripts/stalwart-apply.sh` — declares Stalwart's configuration with `stalwart-cli`
+  while the setup overlay holds it in recovery mode, so setup needs no web UI.
 - `scripts/stalwart-cert-sync.sh`, on a daily timer — copies Caddy's certificate for
-  the mail host into Stalwart and reloads it, creating the certificate object that
-  points at it on the first run. Stalwart terminates TLS on the mail ports itself,
-  so it needs the pair Caddy already renews.
+  the mail host into Stalwart and reloads it, as the `certsync` account.
 
 ### Changed
 
-- `backup.sh` and `restore.sh` now cover the Stalwart store and its `config.json`.
-  The certificate volume is left out: the sync script reproduces it from Caddy.
+- `backup.sh` and `restore.sh` now cover the Stalwart store.
+- `prod-setup.sh` now creates Stalwart's data directory and Storage Box folder and
+  installs the cert-sync timer.
 
 ## [1.5.1] — 2026-09-20
 

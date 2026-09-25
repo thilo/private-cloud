@@ -27,9 +27,9 @@ what the stack does and how to run it.
   block volumes — while databases and hot caches stay on local SSD. A 1 TB
   setup runs under €10/month.
 - **Hardened containers.** `cap_drop: ALL`, `no-new-privileges` and pinned
-  images everywhere; 11 of 12 services run a **read-only root filesystem**, most
-  non-root. Databases sit on egress-blocked internal networks, only Caddy
-  publishes host ports, and admin passwords stay out of the runtime container
+  images everywhere; 11 of 13 services run a **read-only root filesystem**, most
+  non-root. Databases sit on egress-blocked internal networks, only Caddy and
+  Stalwart's mail ports are published, and admin passwords stay out of the runtime container
   environment.
 - **Acceptance tests against the real client APIs.** `./scripts/verify.sh` hits
   the same endpoints the official clients use — including a small Bitwarden
@@ -43,13 +43,14 @@ what the stack does and how to run it.
   restore.
 
 ```
-                         ┌───────── Caddy (auto-HTTPS, only ingress) ─────────┐
+                         ┌───────── Caddy (auto-HTTPS, HTTP ingress) ─────────┐
   https://seafile.…    → │  seafile-server ─ seafile-db (mariadb) / -redis    │
        …/notification  → │    └ notification-server (real-time push, ws)      │
   https://immich.…     → │  immich-server ─ immich-db / immich-redis / -ml    │
   https://vault.…      → │  vaultwarden (sqlite)                              │
+  https://mail.…       → │  stalwart (sqlite) ← SMTP 25/465, IMAP 993 direct  │
                          └────────────────────────────────────────────────────┘
-   databases live on internal-only networks · only Caddy publishes host ports
+   databases live on internal-only networks · only Caddy and Stalwart publish ports
 ```
 
 ## Production deployment
@@ -101,9 +102,9 @@ certs automatically. To deploy before DNS is ready, set `CADDY_TLS=internal`,
 then flip it to your email and `docker compose up -d caddy` once records
 resolve.
 
-**3. Ports / firewall.** Expose TCP **80 and 443** only — port 80 for the Let's
-Encrypt HTTP challenge and the HTTP→HTTPS redirect. Nothing else publishes
-ports.
+**3. Ports / firewall.** Expose TCP **80 and 443** — port 80 for the Let's
+Encrypt HTTP challenge and the HTTP→HTTPS redirect — plus **25, 465 and 993**,
+Stalwart's mail ports. Nothing else publishes ports.
 
 **4. Prepare the host.** One idempotent script installs the packages the backups
 and the CIFS mount need, adds swap, creates the data directories and Storage Box
@@ -122,10 +123,13 @@ both:
 docker compose -f docker-compose.yml -f docker-compose.production.yml \
   -f docker-compose.setup.yml \
   --env-file /root/.env.production --env-file /root/.env.production.setup up -d
+./scripts/stalwart-apply.sh      # declare Stalwart's configuration (see Stalwart setup)
 # register your Immich + Vaultwarden accounts now in a browser, while the setup overlay is up
 ./scripts/harden-seafile.sh      # Seahub security settings (after a fresh setup)
 ./scripts/verify.sh              # acceptance tests
 rm /root/.env.production.setup   # setup done; keep it in your offline backup
+docker compose up -d             # drop the setup overlay
+./scripts/stalwart-cert-sync.sh  # mail certificate now, not at the first timer run
 
 # Day-to-day afterwards (prod.env already sourced):  docker compose up -d
 ```
@@ -188,10 +192,13 @@ verification scripts), outbound internet.
 # (and open Vaultwarden signups so you can register your first account):
 docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \
   -f docker-compose.setup.yml --env-file .env --env-file .env.setup up -d
+ENV_FILE=.env ./scripts/stalwart-apply.sh   # see Stalwart setup
 
 # register your Immich + Vaultwarden accounts now in a browser, while the setup
 # overlay is up (see below)
 ./scripts/verify.sh        # run the three acceptance tests
+docker compose up -d       # drop the setup overlay
+ENV_FILE=.env ./scripts/stalwart-cert-sync.sh
 
 # Day-to-day afterwards is just:  docker compose up -d
 ```
@@ -315,6 +322,18 @@ docker compose up -d vaultwarden   # Vaultwarden picks it up on recreate
 `harden-seafile.sh` reads whichever env file `ENV_FILE` points at, so the
 password is written down **once**. Re-run it after any `SMTP_*` change.
 
+## Stalwart setup
+
+Stalwart is configured without its web UI. `stalwart/config.json` only names the
+store; `scripts/stalwart-apply.sh` declares the rest with `stalwart-cli`: the
+blob store, the mail domain `MAIL_DOMAIN`, the `admin` and `certsync` accounts
+and the SMTP policy. The first `up` with the setup overlay starts Stalwart in
+recovery mode for that script, and the next plain `up` starts it normally.
+
+The administrator is user `admin` with `STALWART_ADMIN_PASSWORD` from the setup
+file, for the web admin at `STALWART_URL` and for `stalwart-cli`. Re-running the
+script re-applies the same state; restart Stalwart for a change to take effect.
+
 ## Stalwart certificates
 
 Caddy fronts Stalwart's HTTP side, but SMTP and IMAP are not HTTP: Stalwart
@@ -329,9 +348,8 @@ object pointing at it, and every later run refreshes the files and asks the
 server to reload — which is what makes a renewal take effect. Certificates
 configured for anything else are left untouched.
 
-The one thing to set up by hand is the credential the script authenticates with:
-create an API key in Stalwart's admin UI and put it in the env file as
-`STALWART_API_KEY`.
+The script authenticates as `certsync`, an account limited to certificates and
+the reload action, with `STALWART_CERTSYNC_PASSWORD` from the runtime file.
 
 ```bash
 ENV_FILE=.env ./scripts/stalwart-cert-sync.sh      # copy + reload now
@@ -367,6 +385,7 @@ Verified on the live stack:
 | seafile-server               | ⚠️ **daemons uid 8000** (`NON_ROOT`); init/nginx stay root | ❌ no            |
 | notification-server          | ✅ uid 8000, zero capabilities                             | ✅ yes           |
 | immich-ml                    | ✅ uid 1000                                                | ✅ yes           |
+| stalwart                     | ✅ uid 2000 + only `NET_BIND_SERVICE`                      | ✅ yes           |
 
 `seafile-server` is the one exception, and a stock-image limitation: the image
 regenerates config and runs its own nginx across the filesystem. It keeps every
@@ -427,12 +446,12 @@ never include human-account passwords:
 | ------------------- | -------------------------------------------- | --------------------------------------------------- |
 | File (local / prod) | `.env` / `/root/.env.production`             | `.env.setup` / `/root/.env.production.setup`        |
 | Loaded by           | Compose, on **every** `up`                   | only `init.sh`, `verify.sh`, and the **first** `up` |
-| Contents            | DB / Redis / Storage Box / JWT machine creds | the first Seafile admin + Stalwart's setup admin    |
+| Contents            | DB / Redis / Storage Box / JWT machine creds | the first Seafile admin + Stalwart's admin          |
 
 `scripts/init.sh` generates both (each `chmod 600`, both gitignored). The base
 `docker-compose.yml` never references the setup file, so a normal `up` puts no
 admin credentials into any container: Seafile's first-boot seeding vars and the
-administrator Stalwart's web setup runs under live in `docker-compose.setup.yml`,
+Stalwart's recovery mode with its administrator live in `docker-compose.setup.yml`,
 applied only on the first `up`. That overlay also
 opens Vaultwarden's signups and web vault for that one run. Immich and
 Vaultwarden admins are registered in the browser, so they appear in neither
@@ -534,6 +553,7 @@ docker-compose.setup.yml           overlay: first `up` only — seed admin, open
 .env.production.example            production config template → .env.production
 .env.setup.example                 setup-only secrets         → .env[.production].setup
 caddy/Caddyfile                    reverse proxy + automatic HTTPS
+stalwart/config.json               Stalwart's store location; the rest is in the store
 scripts/init.sh                    generate the env files with fresh secrets
 scripts/prod.env                   source to point compose + scripts at production
 scripts/prod-setup.sh              one-time host prep (packages, swap, dirs, timers, sshd)
@@ -544,6 +564,7 @@ scripts/mount-watchdog.sh          recover a wedged CIFS mount (60s timer)
 scripts/immich-preview-mover.sh    move Immich previews to the box, symlink them back
 scripts/notify-failure.sh          mail an alert when a timer's unit fails
 scripts/harden-seafile.sh          Seahub security settings + worker count (idempotent)
+scripts/stalwart-apply.sh          declare Stalwart's configuration with stalwart-cli
 scripts/stalwart-cert-sync.sh      copy Caddy's mail certificate into Stalwart (daily timer)
 scripts/verify.sh                  the three acceptance tests + an env-file lint
 scripts/vw-test.mjs                Bitwarden-client crypto for the password test
