@@ -56,6 +56,10 @@ jq -nc --arg dom "$MAIL_DOMAIN" --arg host "$MX_DOMAIN" \
   # they match by value, which needs every field spelled out.
   {"@type":"reconcile","object":"Tracer","matchOn":"*","value":{"out":{"@type":"Stdout",
     "multiline":false,"lossy":false,"ansi":false,"buffered":true,"enable":true,"events":{},"eventsPolicy":"exclude","level":"info"}}},
+  # Every web request arrives from Caddy. Without the forwarded client IP, one
+  # scanner hit makes Stalwart ban Caddy and refuse everyone. Caddy is the only
+  # client of port 8080 and replaces any client-sent X-Forwarded-For.
+  {"@type":"update","object":"Http","value":{"useXForwarded":true}},
   {"@type":"update","object":"SystemSettings","value":{"defaultDomainId":"#dom","defaultHostname":$host}},
   # Mail forwarded by Google fails the original sender SPF check; its ARC seal
   # lets the spam filter see the result Google recorded.
