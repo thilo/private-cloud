@@ -137,6 +137,7 @@ services:
       IMMICH_DOMAIN: ${IMMICH_DOMAIN}
       VAULTWARDEN_DOMAIN: ${VAULTWARDEN_DOMAIN}
       SEAFILE_DOMAIN: ${SEAFILE_DOMAIN}
+      MX_DOMAIN: ${MX_DOMAIN}
       STALWART_DOMAIN: ${STALWART_DOMAIN}
       CADDY_TLS: ${CADDY_TLS}
     volumes:
@@ -290,7 +291,7 @@ services:
       # Both override what the store holds, so the name Stalwart answers with
       # follows this file. PUBLIC_URL is what OAuth/JMAP discovery documents
       # publish, so it carries the port in local runs.
-      STALWART_HOSTNAME: ${STALWART_DOMAIN}
+      STALWART_HOSTNAME: ${MX_DOMAIN}
       STALWART_PUBLIC_URL: ${STALWART_URL}
       # Recovery mode and its administrator are supplied transiently by
       # docker-compose.setup.yml, so no credential stays in

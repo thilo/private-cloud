@@ -26,7 +26,7 @@ set -a; . "$ENV_FILE"; set +a
 log()  { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
-[[ -n "${STALWART_DOMAIN:-}" ]] || fail "STALWART_DOMAIN is not set in $ENV_FILE"
+[[ -n "${MX_DOMAIN:-}" ]] || fail "MX_DOMAIN is not set in $ENV_FILE"
 [[ -n "${STALWART_CERTSYNC_PASSWORD:-}" && "$STALWART_CERTSYNC_PASSWORD" != "CHANGEME" ]] \
   || fail "STALWART_CERTSYNC_PASSWORD is not set in $ENV_FILE"
 
@@ -41,9 +41,9 @@ sw_api() {
 # internal CA, `acme-v02...` for Let's Encrypt), so look it up instead of
 # hardcoding a path that differs between the local and production stacks.
 crt_path="$(docker exec pc-caddy sh -c \
-  "ls /data/caddy/certificates/*/${STALWART_DOMAIN}/${STALWART_DOMAIN}.crt 2>/dev/null | head -1")" \
+  "ls /data/caddy/certificates/*/${MX_DOMAIN}/${MX_DOMAIN}.crt 2>/dev/null | head -1")" \
   || fail "cannot reach pc-caddy"
-[[ -n "$crt_path" ]] || fail "Caddy has no certificate for ${STALWART_DOMAIN} yet"
+[[ -n "$crt_path" ]] || fail "Caddy has no certificate for ${MX_DOMAIN} yet"
 
 jmap() { # request body on stdin, response on stdout
   sw_api 'curl -sf -X POST -u "certsync:$SW_PW" -H "Content-Type: application/json" --data-binary @- http://127.0.0.1:8080/jmap'
@@ -64,12 +64,12 @@ printf '{"using":["urn:ietf:params:jmap:core","urn:stalwart:jmap"],"methodCalls"
   | jmap | grep -qF "$TLS_DIR/mail.crt" && exists=1 || exists=0
 
 if [[ "$changed" == 0 && "$exists" == 1 ]]; then
-  log "certificate for ${STALWART_DOMAIN} unchanged — nothing to do"
+  log "certificate for ${MX_DOMAIN} unchanged — nothing to do"
   exit 0
 fi
 
 if [[ "$changed" == 1 ]]; then
-  log "installing certificate for ${STALWART_DOMAIN} ..."
+  log "installing certificate for ${MX_DOMAIN} ..."
   docker exec -u 2000 pc-stalwart mkdir -p "$TLS_DIR"
   docker exec pc-caddy cat "$crt_path" \
     | docker exec -i -u 2000 pc-stalwart sh -c "cat > $TLS_DIR/mail.crt"

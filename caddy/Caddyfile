@@ -16,8 +16,8 @@
 # /etc/caddy/Caddyfile` or a force-recreate of the container.
 #
 # Domains come from the environment (SEAFILE_DOMAIN / IMMICH_DOMAIN /
-# VAULTWARDEN_DOMAIN / STALWART_DOMAIN), so this file never changes between
-# deployments.
+# VAULTWARDEN_DOMAIN / STALWART_DOMAIN / MX_DOMAIN), so this file never changes
+# between deployments.
 #
 # Public certs are issued over the HTTP challenge, which needs inbound :80. For a
 # DNS challenge instead (wildcard certs, or no inbound :80), build a Caddy image
@@ -95,8 +95,9 @@
 
 # ----------------------------------------------------------------- Stalwart --
 # The HTTP half of the mail server: web admin, CalDAV, CardDAV. SMTP and IMAP do
-# not pass through here — pc-stalwart publishes those ports itself.
-{$STALWART_DOMAIN} {
+# not pass through here — pc-stalwart publishes those ports itself. The mail host
+# stays listed so Caddy keeps obtaining the certificate those ports use.
+{$STALWART_DOMAIN}, {$MX_DOMAIN} {
 	tls {$CADDY_TLS}
 	import security_headers
 

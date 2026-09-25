@@ -48,7 +48,7 @@ what the stack does and how to run it.
        …/notification  → │    └ notification-server (real-time push, ws)      │
   https://immich.…     → │  immich-server ─ immich-db / immich-redis / -ml    │
   https://vault.…      → │  vaultwarden (sqlite)                              │
-  https://mail.…       → │  stalwart (sqlite) ← SMTP 25/465, IMAP 993 direct  │
+  https://stalwart.…   → │  stalwart (sqlite) ← SMTP 25/465, IMAP 993 direct  │
                          └────────────────────────────────────────────────────┘
    databases live on internal-only networks · only Caddy and Stalwart publish ports
 ```
@@ -338,7 +338,7 @@ script re-applies the same state; restart Stalwart for a change to take effect.
 
 Caddy fronts Stalwart's HTTP side, but SMTP and IMAP are not HTTP: Stalwart
 publishes those ports itself and terminates TLS on them, so it needs the same
-certificate Caddy holds for `STALWART_DOMAIN`. Caddy stays the only ACME client
+certificate Caddy holds for `MX_DOMAIN`. Caddy stays the only ACME client
 and the pair is copied across, because Caddy writes it readable only by its own
 uid.
 

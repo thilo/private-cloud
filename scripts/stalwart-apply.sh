@@ -21,7 +21,7 @@ ENV_FILE="${ENV_FILE:-.env.production}"
 [[ -f "$ENV_FILE" ]] || { echo "$ENV_FILE not found — run: source scripts/prod.env" >&2; exit 1; }
 set -a; . "$ENV_FILE"; [[ -f "$ENV_FILE.setup" ]] && . "$ENV_FILE.setup"; set +a
 
-for v in MAIL_DOMAIN STALWART_DOMAIN STALWART_CLI_IMAGE STALWART_ADMIN_PASSWORD STALWART_CERTSYNC_PASSWORD; do
+for v in MAIL_DOMAIN MX_DOMAIN STALWART_CLI_IMAGE STALWART_ADMIN_PASSWORD STALWART_CERTSYNC_PASSWORD; do
   [[ -n "${!v:-}" && "${!v}" != "CHANGEME" ]] || { echo "$v is not set" >&2; exit 1; }
 done
 
@@ -33,7 +33,7 @@ reject_unknown='require "reject";
 reject "550 5.1.1 Mailbox does not exist.";'
 rcpt_guard="is_empty(authenticated_as) && rcpt_domain == '$MAIL_DOMAIN' && !is_local_address(rcpt)"
 
-jq -nc --arg dom "$MAIL_DOMAIN" --arg host "$STALWART_DOMAIN" \
+jq -nc --arg dom "$MAIL_DOMAIN" --arg host "$MX_DOMAIN" \
   --arg adminpw "$STALWART_ADMIN_PASSWORD" --arg certpw "$STALWART_CERTSYNC_PASSWORD" \
   --arg sieve "$reject_unknown" --arg guard "$rcpt_guard" --arg script "'reject-unknown'" '
   {"@type":"update","object":"BlobStore","value":{"@type":"FileSystem","path":"/var/lib/stalwart/blobs","depth":3}},
