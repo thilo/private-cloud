@@ -58,7 +58,9 @@ what the stack does and how to run it.
 You need: a Linux host with Docker + Compose (**4 GB RAM is enough**), a CIFS
 share for the bulk storage (e.g. a Hetzner **Storage Box** with SMB enabled, in
 the **same location** as the server — traffic between them is free), and a
-domain with three names you can point at the server.
+domain with five names you can point at the server (Seafile, Immich,
+Vaultwarden, `MX_DOMAIN`, `STALWART_DOMAIN`) plus the mail records for
+`MAIL_DOMAIN`.
 
 Production adds a **separate env file** (`.env.production`) and a small
 **overlay** (`docker-compose.production.yml`) that pins the latency-sensitive
@@ -101,6 +103,19 @@ source scripts/prod.env          # sets COMPOSE_FILE / COMPOSE_ENV_FILES / ENV_F
 certs automatically. To deploy before DNS is ready, set `CADDY_TLS=internal`,
 then flip it to your email and `docker compose up -d caddy` once records
 resolve.
+
+Mail for `MAIL_DOMAIN` needs these records in addition:
+
+| Record | Name                     | Value                                              |
+|--------|--------------------------|----------------------------------------------------|
+| MX     | `MAIL_DOMAIN`            | `MX_DOMAIN`                                        |
+| TXT    | `MAIL_DOMAIN`            | SPF, e.g. `v=spf1 mx -all`                         |
+| TXT    | `_dmarc.MAIL_DOMAIN`     | DMARC, e.g. `v=DMARC1; p=quarantine`               |
+| TXT    | `<selector>._domainkey…` | the two DKIM keys (see [Stalwart setup](#stalwart-setup)) |
+| PTR    | the server's IP          | `MX_DOMAIN`, set at the hosting provider           |
+
+Receivers check the PTR record against the name the server greets with
+(`MX_DOMAIN`); without it, outgoing mail is likely to be marked as spam.
 
 **3. Ports / firewall.** Expose TCP **80 and 443** — port 80 for the Let's
 Encrypt HTTP challenge and the HTTP→HTTPS redirect — plus **25, 465 and 993**,
@@ -333,6 +348,23 @@ recovery mode for that script, and the next plain `up` starts it normally.
 The administrator is user `admin` with `STALWART_ADMIN_PASSWORD` from the setup
 file, for the web admin at `STALWART_URL` and for `stalwart-cli`. Re-running the
 script re-applies the same state; restart Stalwart for a change to take effect.
+
+The first normal start generates the domain's DKIM keys. The Domain object's
+`dnsZoneFile` field holds the suggested records for `MAIL_DOMAIN`, the two
+`_domainkey` TXT records among them (`stalwart-cli get Domain <id> --json`, as
+`admin`).
+
+The script creates no mailbox. Create a `User` account under `MAIL_DOMAIN` with
+a password in the web admin; its address is `name@MAIL_DOMAIN`. Clients then
+use:
+
+| Service          | Server             | Port / path                  |
+|------------------|--------------------|------------------------------|
+| IMAP             | `MX_DOMAIN`        | 993, TLS                     |
+| SMTP submission  | `MX_DOMAIN`        | 465, TLS (there is no 587)   |
+| CalDAV / CardDAV | `STALWART_DOMAIN`  | `STALWART_URL`, discovered via `/.well-known` |
+
+All three accept either the account name or the full address as the login.
 
 ## Stalwart certificates
 
