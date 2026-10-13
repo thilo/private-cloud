@@ -500,6 +500,7 @@ services:
       MACHINE_LEARNING_MODEL_TTL: "300"
       MACHINE_LEARNING_WORKERS: "1"
       MACHINE_LEARNING_REQUEST_THREADS: "1"
+      MACHINE_LEARNING_MODEL_REVISION: "v2"
     volumes:
       - immich_modelcache:/cache
     # ml only: nothing but immich-server needs to reach the unauthenticated ML API.

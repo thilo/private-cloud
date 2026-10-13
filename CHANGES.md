@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.5.2] — 2026-10-13
+
+### Changed
+
+- Gallery `v5.6.0` → `v5.8.0`.
+- `immich-ml` now loads the `v2` model revision.
+
 ## [1.5.1] — 2026-09-20
 
 ### Fixed
