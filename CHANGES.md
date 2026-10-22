@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.5.3] — 2026-10-22
+
+### Security
+
+- Gallery `v5.8.0` → `v5.9.0`, which ships Node.js 24.22.1 (Brotli decoder RCE, CVE-2026-111497).
+
 ## [1.5.2] — 2026-10-13
 
 ### Changed
