@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Consistent backup of the latency-sensitive (attached-volume) state to the
-# Storage Box. The bulk blobs (Immich originals, Seafile object store) already
+# Storage Box. The bulk blobs (Immich originals, Seafile object store, music) already
 # live on the box, so they are NOT copied here — enable the box's automatic
 # snapshots and they are protected in place. Likewise, this script overwrites a
 # single "latest" set under backup/backups/ and relies on those free, automatic
@@ -10,6 +10,7 @@
 #   - Immich Postgres      -> pg_dump (immich db), gzip
 #   - Seafile MariaDB       -> mariadb-dump --single-transaction of all 3 DBs, gzip
 #   - Vaultwarden           -> SQLite .backup (consistent) + data folder, tar.gz
+#   - Navidrome             -> SQLite .backup (consistent) + data folder minus cache/, tar.gz
 #   - Caddy TLS material    -> tar.gz (so a restore doesn't re-hit Let's Encrypt)
 # Each artifact is written to a .partial file, verified, then atomically renamed,
 # so a snapshot taken mid-run never captures a half-written file. A manifest with
@@ -37,7 +38,7 @@ for v in DATA_ROOT SB_HOST SB_SHARE SB_USER SB_PASSWORD SB_SMB_VERS \
 done
 
 # Containers must be running for the online dumps.
-for c in pc-immich-db pc-seafile-db pc-vaultwarden; do
+for c in pc-immich-db pc-seafile-db pc-vaultwarden pc-navidrome; do
   [[ "$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null)" == "true" ]] || fail "$c is not running"
 done
 
@@ -92,7 +93,19 @@ tar czf "$vwtmp" -C "$stage" . || { rm -f "$vwtmp"; fail "vaultwarden: tar faile
 gzip -t "$vwtmp" 2>/dev/null || { rm -f "$vwtmp"; fail "vaultwarden: gzip verification failed"; }
 mv -f "$vwtmp" "$DEST/vaultwarden.tar.gz"
 
-# 4. Caddy TLS material (certs/keys) — small; spares a Let's Encrypt re-issue on restore.
+# 4. Navidrome — users, playlists, play counts and stars in the DB, plus artwork/,
+# which holds uploaded images the music folder has no copy of. cache/ is rebuilt.
+log "dumping navidrome.tar.gz ..."
+ND="$DATA_ROOT/navidrome_data"
+stage="$WORK/navidrome_data"; mkdir -p "$stage"
+( cd "$ND" && tar cf - --exclude='navidrome.db*' --exclude='./cache' . ) | ( cd "$stage" && tar xf - )
+sqlite3 "$ND/navidrome.db" ".backup '$stage/navidrome.db'" || fail "navidrome: sqlite .backup failed"
+ndtmp="$DEST/.navidrome.tar.gz.partial"
+tar czf "$ndtmp" -C "$stage" . || { rm -f "$ndtmp"; fail "navidrome: tar failed"; }
+gzip -t "$ndtmp" 2>/dev/null || { rm -f "$ndtmp"; fail "navidrome: gzip verification failed"; }
+mv -f "$ndtmp" "$DEST/navidrome.tar.gz"
+
+# 5. Caddy TLS material (certs/keys) — small; spares a Let's Encrypt re-issue on restore.
 catmp="$DEST/.caddy_data.tar.gz.partial"
 tar czf "$catmp" -C "$DATA_ROOT/caddy_data" . || { rm -f "$catmp"; fail "caddy: tar failed"; }
 gzip -t "$catmp" 2>/dev/null || { rm -f "$catmp"; fail "caddy: gzip verification failed"; }
@@ -104,10 +117,10 @@ mv -f "$catmp" "$DEST/caddy_data.tar.gz"
   echo "host:    $(hostname)"
   echo "date:    $(date '+%Y-%m-%d %H:%M:%S %z')"
   echo
-  ( cd "$DEST" && ls -l immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz caddy_data.tar.gz )
+  ( cd "$DEST" && ls -l immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz navidrome.tar.gz caddy_data.tar.gz )
   echo
-  ( cd "$DEST" && sha256sum immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz caddy_data.tar.gz )
+  ( cd "$DEST" && sha256sum immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz navidrome.tar.gz caddy_data.tar.gz )
 } > "$DEST/backup-manifest.txt"
 
 log "backup complete -> //${SB_HOST}/${SB_SHARE}/backups/"
-( cd "$DEST" && du -h immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz caddy_data.tar.gz ) | sed 's/^/  /'
+( cd "$DEST" && du -h immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz navidrome.tar.gz caddy_data.tar.gz ) | sed 's/^/  /'

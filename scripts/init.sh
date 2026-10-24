@@ -52,6 +52,7 @@ set_kv "$ENV_FILE" SEAFILE_DB_ROOT_PASSWORD "$(gen)"
 set_kv "$ENV_FILE" SEAFILE_DB_PASSWORD      "$(gen)"
 set_kv "$ENV_FILE" SEAFILE_REDIS_PASSWORD   "$(gen)"
 set_kv "$ENV_FILE" SEAFILE_JWT_KEY          "$(gen 44)"
+set_kv "$ENV_FILE" NAVIDROME_PASSWORD_KEY   "$(gen)"
 [[ "$GEN_SB_PASSWORD" == "1" ]] && set_kv "$ENV_FILE" SB_PASSWORD "$(gen)"
 
 # Setup-only secrets -> the setup file: the initial Seafile admin password.
@@ -69,7 +70,7 @@ echo "Next — the FIRST 'up' adds the setup overlay + setup env file (seeds the
 if [[ "$ENV_FILE" == ".env" ]]; then
   echo "  docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \\"
   echo "    -f docker-compose.setup.yml --env-file .env --env-file .env.setup up -d"
-  echo "Then register the Immich + Vaultwarden first accounts in the browser (while"
+  echo "Then register the Immich, Vaultwarden + Navidrome first accounts in the browser (while"
   echo "the setup overlay is up), and run:  ./scripts/verify.sh"
   echo "Day-to-day afterwards is just:  docker compose up -d"
 else
@@ -77,7 +78,7 @@ else
   echo "  docker compose -f docker-compose.yml -f docker-compose.production.yml \\"
   echo "    -f docker-compose.setup.yml \\"
   echo "    --env-file $ENV_FILE --env-file $SETUP_FILE up -d"
-  echo "Then register the Immich + Vaultwarden first accounts in the browser (while"
+  echo "Then register the Immich, Vaultwarden + Navidrome first accounts in the browser (while"
   echo "the setup overlay is up), and run:  ./scripts/verify.sh"
   echo "Day-to-day afterwards is just:  docker compose up -d"
 fi

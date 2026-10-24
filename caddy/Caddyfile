@@ -16,7 +16,8 @@
 # /etc/caddy/Caddyfile` or a force-recreate of the container.
 #
 # Domains come from the environment (SEAFILE_DOMAIN / IMMICH_DOMAIN /
-# VAULTWARDEN_DOMAIN), so this file never changes between deployments.
+# VAULTWARDEN_DOMAIN / NAVIDROME_DOMAIN), so this file never changes between
+# deployments.
 #
 # Public certs are issued over the HTTP challenge, which needs inbound :80. For a
 # DNS challenge instead (wildcard certs, or no inbound :80), build a Caddy image
@@ -90,4 +91,12 @@
 	import security_headers
 
 	reverse_proxy vaultwarden:8080
+}
+
+# ---------------------------------------------------------------- Navidrome --
+{$NAVIDROME_DOMAIN} {
+	tls {$CADDY_TLS}
+	import security_headers
+
+	reverse_proxy navidrome:4533
 }

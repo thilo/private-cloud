@@ -1,4 +1,5 @@
-# Personal Cloud — Seafile + Immich + Vaultwarden behind a hardened Caddy.
+# Personal Cloud — Seafile + Immich + Vaultwarden + Navidrome behind a hardened
+# Caddy.
 #
 #   ./scripts/init.sh          # generate .env with strong secrets (run once)
 #   docker compose up -d       # bring the stack up
@@ -55,6 +56,7 @@ volumes:
   seafile_logs: # Seafile logs — kept local (per-request access logs are chatty)
   immich_thumbs: # Immich thumbnails (read on every grid/scroll)
   immich_encoded: # Immich transcoded video
+  navidrome_data: # Navidrome SQLite DB (users, playlists, play counts) + art/transcode cache
 
   # Storage Box — cheap bulk blobs over CIFS/SMB. ${SB_*} come from .env.
   #   LOCAL : docker-compose.storagebox-sim.yml runs a Samba server at ${SB_HOST}.
@@ -67,15 +69,16 @@ volumes:
   # the host mounts in prod-setup.sh / backup.sh / restore.sh. Transport only:
   # data lands on the box in plaintext, so snapshots hold plaintext and a restore
   # needs no key. For at-rest encryption use a Seafile encrypted library.
-  # noexec,nosuid,nodev: both shares hold only blobs, config and avatars, never
-  # executables. Like any driver_opts change, applying these needs a `docker volume
-  # rm` + recreate.
-  # iocharset is intentionally NOT set: modern CIFS already maps filenames as
-  # UTF-8 by default (via the built-in UTF-16 conversion in nls_ucs2_utils), so
-  # Unicode names round-trip correctly. An explicit iocharset=utf8 would instead
-  # require the nls_utf8 kernel module, which minimal cloud kernels (e.g. Ubuntu's
-  # -virtual flavor) do not ship — that mount fails with a misleading
-  # "can not access a needed shared library" error.
+  # noexec,nosuid,nodev: the shares hold only blobs, config, avatars and music,
+  # never executables. Like any driver_opts change, applying these needs a
+  # `docker volume rm` + recreate.
+  # iocharset is intentionally NOT set: without it CIFS maps filenames with the
+  # kernel's CONFIG_NLS_DEFAULT, which Ubuntu builds as utf8, so Unicode names
+  # round-trip correctly. (Docker Desktop's kernel defaults to iso8859-1;
+  # docker-compose.storagebox-sim.yml covers that.) An explicit iocharset=utf8
+  # would instead require the nls_utf8 kernel module, which minimal cloud kernels
+  # (e.g. Ubuntu's -virtual flavor) do not ship — that mount fails with a
+  # misleading "can not access a needed shared library" error.
   # nostrictsync (immich_data only): skip the server-side flush on fsync(). Photo
   # ingest is many small write+fsync bursts where the round-trip to the box — not
   # raw throughput — is the tax, so dropping the per-file flush is a documented
@@ -100,6 +103,12 @@ volumes:
       type: cifs
       device: "//${SB_HOST}/${SB_SHARE}/seafile"
       o: "username=${SB_USER},password=${SB_PASSWORD},addr=${SB_HOST},uid=8000,gid=8000,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,noexec,nosuid,nodev"
+  navidrome_music: # the music library, as plain files you copy onto the box (uid 1002)
+    driver: local
+    driver_opts:
+      type: cifs
+      device: "//${SB_HOST}/${SB_SHARE}/music"
+      o: "username=${SB_USER},password=${SB_PASSWORD},addr=${SB_HOST},uid=1002,gid=1002,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,noexec,nosuid,nodev"
 
 services:
   # --------------------------------------------------------------- ingress --
@@ -125,6 +134,7 @@ services:
       IMMICH_DOMAIN: ${IMMICH_DOMAIN}
       VAULTWARDEN_DOMAIN: ${VAULTWARDEN_DOMAIN}
       SEAFILE_DOMAIN: ${SEAFILE_DOMAIN}
+      NAVIDROME_DOMAIN: ${NAVIDROME_DOMAIN}
       CADDY_TLS: ${CADDY_TLS}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -159,6 +169,8 @@ services:
         condition: service_started
       seafile-server:
         condition: service_started
+      navidrome:
+        condition: service_started
 
   # ------------------------------------------------------------ vaultwarden --
   # One-shot chowner so the non-root services own their LOCAL data volumes before
@@ -174,10 +186,11 @@ services:
       [
         "sh",
         "-c",
-        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs",
+        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs && chown -R 1002:1002 /navidrome-data",
       ]
     volumes:
       - vaultwarden_data:/vw
+      - navidrome_data:/navidrome-data
       - immich_thumbs:/immich-thumbs
       - immich_encoded:/immich-encoded
       - immich_modelcache:/immich-modelcache
@@ -746,5 +759,68 @@ services:
         ]
       interval: 30s
       timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # -------------------------------------------------------------- navidrome --
+  # Music streaming over the Subsonic API, which the desktop and iOS players
+  # speak, plus its own web player. The library is the plain-file music/ folder
+  # on the Storage Box; Navidrome indexes it and reads album art from the tags or
+  # a cover.* file beside the tracks.
+  navidrome:
+    image: ${NAVIDROME_IMAGE}
+    container_name: pc-navidrome
+    restart: *restart
+    # Single Go process; ffmpeg runs as a child only when a client asks for a
+    # transcoded stream. Measured: 162 MiB peak, full scan of 600 tracks + 4 transcodes.
+    mem_limit: 256m
+    pids_limit: 64
+    # Distinct from the uid-1000 apps, for the same reason as Caddy's 1001.
+    user: "1002:1002"
+    environment:
+      ND_MUSICFOLDER: /music
+      ND_DATAFOLDER: /data
+      # The watcher relies on inotify, which never fires for files that reach the
+      # box over SMB/SFTP from another machine. A scheduled quick scan picks them
+      # up instead; "Scan library" in the web UI does it on demand.
+      ND_SCANNER_WATCHERWAIT: "0"
+      ND_SCANNER_SCHEDULE: "@every 1h"
+      # Subsonic token auth needs the plaintext password, so Navidrome stores it
+      # encrypted. Unset, the key is a constant compiled into every build.
+      ND_PASSWORDENCRYPTIONKEY: ${NAVIDROME_PASSWORD_KEY}
+      ND_ENABLEINSIGHTSCOLLECTOR: "false"
+      # ND_EXTAUTH_TRUSTEDSOURCES stays unset. Setting it would let Navidrome read
+      # the client IP from X-Forwarded-For, but it also accepts a Remote-User
+      # header as a login from those sources — and every container on the proxy
+      # bridge would be one. Unset, the login limiter sees only Caddy's IP: one
+      # shared bucket, which for a single user is a stricter limit, not a looser one.
+      TZ: ${TZ}
+    volumes:
+      # :ro — Navidrome only reads the library; files are added on the box itself.
+      - navidrome_music:/music:ro
+      - navidrome_data:/data
+    networks:
+      - proxy
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    read_only: true
+    # noexec/nosuid/nodev: ffmpeg is on the rootfs; /tmp is only its scratch.
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Also list the Storage Box CIFS mount so a wedged SMB session reads as
+    # unhealthy, not healthy-with-dead-storage. A listing, because the library has
+    # no fixed child path to stat. Recovery: scripts/mount-watchdog.sh.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS --max-time 5 http://127.0.0.1:4533/ping >/dev/null 2>&1 && timeout 8 ls /music >/dev/null 2>&1",
+        ]
+      interval: 30s
+      timeout: 15s
       retries: 5
       start_period: 30s

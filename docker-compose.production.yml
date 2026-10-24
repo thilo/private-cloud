@@ -20,10 +20,12 @@
 #   on the attached volume  -> databases + Vaultwarden + Seafile conf/metadata +
 #                              Immich hot derivatives (thumbs/encoded) + Caddy's
 #                              TLS material (must persist — re-issuing hits LE
-#                              rate limits) + the ML model cache.
+#                              rate limits) + the ML model cache + Navidrome's
+#                              SQLite DB and cache.
 #   on the host root disk   -> seafile_logs (chatty per-request logs) stays a
 #                              plain named volume; tmpfs handles scratch.
-#   on the Storage Box      -> immich_data, seafile_box (defined in the base file).
+#   on the Storage Box      -> immich_data, seafile_box, navidrome_music (defined
+#                              in the base file).
 
 name: private-cloud
 
@@ -52,3 +54,6 @@ volumes:
   seafile_data:
     driver: local
     driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/seafile_data" }
+  navidrome_data:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${DATA_ROOT}/navidrome_data" }

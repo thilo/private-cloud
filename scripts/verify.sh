@@ -5,6 +5,8 @@
 #   3. Seafile    — sync a local file (same Web API the desktop/iOS clients use)
 #                   + real-time push: a websocket upgrade on the URL Seafile
 #                     advertises, and the sidecar reachable from the server
+#   4. Navidrome  — browse, search, album art and a stream (Subsonic API, which
+#                   the desktop and iOS players use)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 # Runtime config lives in the runtime env file; the Seafile admin secret lives in
@@ -67,11 +69,12 @@ info() { printf '  • %s\n' "$1"; }
 R="127.0.0.1"
 IM_BASE="https://${IMMICH_DOMAIN}:${HTTPS_PORT}"
 SF_BASE="https://${SEAFILE_DOMAIN}:${HTTPS_PORT}"
+ND_BASE="https://${NAVIDROME_DOMAIN}:${HTTPS_PORT}"
 
 jget() { python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get(sys.argv[1],""))' "$1"; }
 
 # -------------------------------------------------------------- Vaultwarden --
-echo "[1/3] Vaultwarden — store & retrieve a password (Bitwarden-compatible)"
+echo "[1/4] Vaultwarden — store & retrieve a password (Bitwarden-compatible)"
 if ! command -v node >/dev/null 2>&1; then
   no "node not found (needed for the Bitwarden client test)"
 else
@@ -112,7 +115,7 @@ else
 fi
 
 # ------------------------------------------------------------------- Immich --
-echo "[2/3] Immich — sync a photo (REST API used by the iOS app)"
+echo "[2/4] Immich — sync a photo (REST API used by the iOS app)"
 im() { curl -sS -k --resolve "${IMMICH_DOMAIN}:${HTTPS_PORT}:${R}" "$@"; }
 # The first Immich admin is created in the browser: admin-sign-up is open until an
 # admin exists, then self-closes. server/config.isInitialized (a public field the
@@ -172,7 +175,7 @@ JPEG
 fi
 
 # ------------------------------------------------------------------ Seafile --
-echo "[3/3] Seafile — sync a local file (Web API used by the desktop/iOS clients)"
+echo "[3/4] Seafile — sync a local file (Web API used by the desktop/iOS clients)"
 sf() { curl -sS -k --resolve "${SEAFILE_DOMAIN}:${HTTPS_PORT}:${R}" "$@"; }
 # If the Seafile admin has 2FA enrolled (ENABLE_TWO_FACTOR_AUTH), the token API
 # needs a one-time code. Pass it for this run only: SEAFILE_OTP=123456 ./scripts/verify.sh
@@ -243,6 +246,43 @@ else
     ok "Seafile reaches the sidecar at $ns_inner"
   else
     no "Seafile cannot reach the sidecar at $ns_inner — its events are dropped"
+  fi
+fi
+
+# ---------------------------------------------------------------- Navidrome --
+echo "[4/4] Navidrome — stream music (Subsonic API used by the desktop/iOS players)"
+nd() { curl -sS -k --resolve "${NAVIDROME_DOMAIN}:${HTTPS_PORT}:${R}" "$@"; }
+# Like Immich, the first admin is created in the browser and stored in no file.
+# The web app's embedded config says whether that has happened yet.
+if [[ "$(nd "${ND_BASE}/app/" 2>/dev/null)" == *'firstTime\":true'* ]]; then
+  info "Navidrome has no admin yet — create it in the browser at ${ND_BASE}, then re-run verify.sh for the music test. Skipping."
+else
+  read -r -p "    Navidrome admin username: " ND_USER
+  read -r -s -p "    Navidrome admin password (input hidden): " ND_PASS; echo
+  # Subsonic token auth, as the clients send it: md5(password + salt).
+  nd_salt=$(openssl rand -hex 6)
+  nd_tok=$(printf '%s' "${ND_PASS}${nd_salt}" | openssl md5 | awk '{print $NF}')
+  nda=(-G -d "u=${ND_USER}" -d "t=${nd_tok}" -d "s=${nd_salt}" -d v=1.16.1 -d c=pc-verify -d f=json)
+  # Evaluates a Python expression against the response's "subsonic-response" (r).
+  ndj() { python3 -c 'import sys,json;r=json.load(sys.stdin)["subsonic-response"];print(eval(sys.argv[1]))' "$1" 2>/dev/null; }
+  if [[ "$(nd "${nda[@]}" "${ND_BASE}/rest/ping" | ndj 'r["status"]')" != ok ]]; then
+    no "Navidrome login failed for ${ND_USER}"
+  else
+    ok "logged in as ${ND_USER}"
+    album=$(nd "${nda[@]}" -d type=random -d size=1 "${ND_BASE}/rest/getAlbumList2" \
+      | ndj '"\t".join((lambda a: [a["id"], a.get("coverArt", ""), a["name"]])(r["albumList2"]["album"][0]))')
+    if [[ -z "$album" ]]; then
+      info "the library is empty — copy music into the box's music/ folder and run a scan. Skipping the rest."
+    else
+      IFS=$'\t' read -r al_id al_art al_name <<<"$album"
+      hits=$(nd "${nda[@]}" --data-urlencode "query=${al_name}" "${ND_BASE}/rest/search3" | ndj 'len(r["searchResult3"].get("album", []))')
+      if [[ "${hits:-0}" -gt 0 ]]; then ok "search finds album \"${al_name}\""; else no "search for \"${al_name}\" found nothing"; fi
+      art=$(nd "${nda[@]}" -d "id=${al_art}" -d size=300 -o /dev/null -w '%{http_code} %{content_type}' "${ND_BASE}/rest/getCoverArt")
+      if [[ "$art" == "200 image/"* ]]; then ok "album art served (${art#* })"; else no "album art: ${art}"; fi
+      song=$(nd "${nda[@]}" -d "id=${al_id}" "${ND_BASE}/rest/getAlbum" | ndj 'r["album"]["song"][0]["id"]')
+      st=$(nd "${nda[@]}" -d "id=${song}" -H 'Range: bytes=0-65535' -o /dev/null -w '%{http_code} %{content_type}' "${ND_BASE}/rest/stream")
+      if [[ "$st" == 20[06]" audio/"* ]]; then ok "streamed a track (${st#* })"; else no "stream: ${st}"; fi
+    fi
   fi
 fi
 

@@ -14,14 +14,22 @@ name: private-cloud
 
 volumes:
   storagebox_data:
+  # Docker Desktop's kernel maps CIFS filenames as iso8859-1 unless told
+  # otherwise, which makes a folder like "Ärzte" unreadable. Only the music share
+  # holds names a person chose; the other shares' names are ASCII. Same options as
+  # the base file plus iocharset=utf8, which that kernel has built in.
+  navidrome_music:
+    driver_opts:
+      o: "username=${SB_USER},password=${SB_PASSWORD},addr=${SB_HOST},uid=1002,gid=1002,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,noexec,nosuid,nodev,iocharset=utf8"
 
 services:
   # Pre-create the per-app subfolders the CIFS volumes mount (backup/immich,
-  # backup/seafile). On a real Storage Box you create these once over SFTP/SMB.
+  # backup/seafile, backup/music). On a real Storage Box you create these once
+  # over SFTP/SMB.
   storagebox-init:
     image: alpine:3.20
     container_name: pc-storagebox-init
-    command: ["sh", "-c", "mkdir -p /s/immich /s/seafile && chmod -R 0777 /s"]
+    command: ["sh", "-c", "mkdir -p /s/immich /s/seafile /s/music && chmod -R 0777 /s"]
     volumes:
       - storagebox_data:/s
     restart: "no"
@@ -63,7 +71,7 @@ services:
       retries: 6
       start_period: 15s
 
-  # The two apps must wait for the simulated box before their CIFS volumes mount.
+  # The apps must wait for the simulated box before their CIFS volumes mount.
   # (Merged into the base service definitions; in production these depends_on the
   # real box implicitly — the mount simply targets SB_HOST.)
   immich-server:
@@ -75,6 +83,10 @@ services:
       storagebox:
         condition: service_healthy
   seafile-server:
+    depends_on:
+      storagebox:
+        condition: service_healthy
+  navidrome:
     depends_on:
       storagebox:
         condition: service_healthy

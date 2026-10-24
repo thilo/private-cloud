@@ -5,14 +5,15 @@
 #   sudo -E ./scripts/restore.sh --check                 # verify only, no changes
 #   sudo -E ./scripts/restore.sh --yes                   # restore EVERYTHING
 #   sudo -E ./scripts/restore.sh vaultwarden --yes       # restore one component
-#   components: immich | seafile | vaultwarden | caddy | all   (default: all)
+#   components: immich | seafile | vaultwarden | navidrome | caddy | all
+#               (default: all)
 #
 # The stack must already be up (docker compose up -d) so the database containers
 # exist; this script stops only the services it touches, restores, and starts
 # them again. RESTORING OVERWRITES LIVE DATA — it prompts for confirmation (or
 # pass --yes). Use --check first: it verifies sha256 + gzip, loads the Immich
 # dump into a throwaway scratch DB, and runs an integrity check on the
-# Vaultwarden SQLite snapshot, all WITHOUT changing anything live. --check also
+# Vaultwarden and Navidrome SQLite snapshots, all WITHOUT changing anything live. --check also
 # runs weekly on its own timer (scripts/systemd/pc-restore-check.*), so a backup
 # that exists but does not restore surfaces within a week:
 #
@@ -37,12 +38,12 @@ for a in "$@"; do
   case "$a" in
     --check) CHECK=1 ;;
     -y|--yes) ASSUME_YES=1 ;;
-    immich|seafile|vaultwarden|caddy|all) COMPONENTS+=("$a") ;;
+    immich|seafile|vaultwarden|navidrome|caddy|all) COMPONENTS+=("$a") ;;
     *) fail "unknown argument: $a" ;;
   esac
 done
 [[ ${#COMPONENTS[@]} -eq 0 ]] && COMPONENTS=(all)
-printf '%s\n' "${COMPONENTS[@]}" | grep -qx all && COMPONENTS=(immich seafile vaultwarden caddy)
+printf '%s\n' "${COMPONENTS[@]}" | grep -qx all && COMPONENTS=(immich seafile vaultwarden navidrome caddy)
 want() { printf '%s\n' "${COMPONENTS[@]}" | grep -qx "$1"; }
 
 require_running() {
@@ -73,7 +74,7 @@ DEST="$MNT/backups"
 verify_integrity() {
   log "backup manifest:"; sed 's/^/    /' "$DEST/backup-manifest.txt" 2>/dev/null || log "  (no manifest found)"
   local f
-  for f in immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz caddy_data.tar.gz; do
+  for f in immich-db.sql.gz seafile-db.sql.gz vaultwarden.tar.gz navidrome.tar.gz caddy_data.tar.gz; do
     [[ -s "$DEST/$f" ]] || fail "$f missing or empty in backups/"
     gzip -t "$DEST/$f" 2>/dev/null || fail "$f failed gzip integrity check"
   done
@@ -116,6 +117,12 @@ if [[ "$CHECK" == 1 ]]; then
     mkdir -p "$WORK/vw"; tar xzf "$DEST/vaultwarden.tar.gz" -C "$WORK/vw"
     res=$(sqlite3 "$WORK/vw/db.sqlite3" "PRAGMA integrity_check;" 2>&1 || true)
     [[ "$res" == "ok" ]] && log "  db.sqlite3 integrity_check: ok" || fail "Vaultwarden db.sqlite3 integrity_check: $res"
+  fi
+  if want navidrome; then
+    log "checking Navidrome SQLite snapshot ..."
+    mkdir -p "$WORK/nd"; tar xzf "$DEST/navidrome.tar.gz" -C "$WORK/nd"
+    res=$(sqlite3 "$WORK/nd/navidrome.db" "PRAGMA integrity_check;" 2>&1 || true)
+    [[ "$res" == "ok" ]] && log "  navidrome.db integrity_check: ok" || fail "Navidrome navidrome.db integrity_check: $res"
   fi
   log "CHECK PASSED — the backup is restorable."
   exit 0
@@ -161,6 +168,17 @@ if want vaultwarden; then
   tar xzf "$DEST/vaultwarden.tar.gz" -C "$d"
   chown -R 1000:1000 "$d"                  # vaultwarden runs as uid 1000
   docker compose up -d vaultwarden >/dev/null
+  log "  done"
+fi
+
+if want navidrome; then
+  log "restore: Navidrome data folder"
+  d="$DATA_ROOT/navidrome_data"; [[ -d "$d" ]] || fail "$d does not exist"
+  docker compose stop navidrome >/dev/null 2>&1 || true
+  find "$d" -mindepth 1 -delete            # also clears any stale navidrome.db-wal/-shm
+  tar xzf "$DEST/navidrome.tar.gz" -C "$d"
+  chown -R 1002:1002 "$d"                  # navidrome runs as uid 1002
+  docker compose up -d navidrome >/dev/null
   log "  done"
 fi
 

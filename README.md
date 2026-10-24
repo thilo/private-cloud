@@ -10,6 +10,9 @@ Self-hosted replacements for the usual cloud subscriptions, in one
   (see [Photos: why the Gallery fork](#photos-why-the-gallery-fork))
 - **Vaultwarden** — password manager with TOTP 2FA, compatible with the
   official **Bitwarden** apps and extensions
+- **Navidrome** — music streaming from your own MP3 library (replaces Spotify /
+  Apple Music for the music you own), with album art, search and playlists;
+  works with any Subsonic player on Mac, Windows and iPhone
 
 behind a single **Caddy** reverse proxy with automatic HTTPS. The same base
 compose file runs locally and on a real server.
@@ -25,7 +28,7 @@ what the stack does and how to run it.
   block volumes — while databases and hot caches stay on local SSD. A 1 TB
   setup runs under €10/month.
 - **Hardened containers.** `cap_drop: ALL`, `no-new-privileges` and pinned
-  images everywhere; 9 of 10 services run a **read-only root filesystem**, most
+  images everywhere; 10 of 11 services run a **read-only root filesystem**, most
   non-root. Databases sit on egress-blocked internal networks, only Caddy
   publishes host ports, and admin passwords stay out of the runtime container
   environment.
@@ -46,6 +49,7 @@ what the stack does and how to run it.
        …/notification  → │    └ notification-server (real-time push, ws)      │
   https://immich.…     → │  immich-server ─ immich-db / immich-redis / -ml    │
   https://vault.…      → │  vaultwarden (sqlite)                              │
+  https://music.…      → │  navidrome (sqlite)                                │
                          └────────────────────────────────────────────────────┘
    databases live on internal-only networks · only Caddy publishes host ports
 ```
@@ -55,7 +59,7 @@ what the stack does and how to run it.
 You need: a Linux host with Docker + Compose (**4 GB RAM is enough**), a CIFS
 share for the bulk storage (e.g. a Hetzner **Storage Box** with SMB enabled, in
 the **same location** as the server — traffic between them is free), and a
-domain with three names you can point at the server.
+domain with four names you can point at the server.
 
 Production adds a **separate env file** (`.env.production`) and a small
 **overlay** (`docker-compose.production.yml`) that pins the latency-sensitive
@@ -146,7 +150,8 @@ the server's local SSD.
 | Immich thumbnails / transcoded video              | local SSD              | `immich_thumbs`, `immich_encoded`             |
 | Seafile object store + config (`/shared/seafile`) | **Storage Box** (CIFS) | `seafile_box`                                 |
 | Seafile logs                                      | local SSD              | `seafile_logs`                                |
-| All databases + Vaultwarden                       | local SSD              | `immich_db`, `seafile_db`, `vaultwarden_data` |
+| Music library (`music/`, plain files)             | **Storage Box** (CIFS) | `navidrome_music`                             |
+| All databases + Vaultwarden + Navidrome           | local SSD              | `immich_db`, `seafile_db`, `vaultwarden_data`, `navidrome_data` |
 
 **`immich-preview-mover` is optional.** Immich puts both of an asset's
 derivatives in one directory and separates them by filename, so no mount can
@@ -189,7 +194,7 @@ docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \
 
 # register your Immich + Vaultwarden accounts now in a browser, while the setup
 # overlay is up (see below)
-./scripts/verify.sh        # run the three acceptance tests
+./scripts/verify.sh        # run the four acceptance tests
 
 # Day-to-day afterwards is just:  docker compose up -d
 ```
@@ -207,6 +212,7 @@ automatically):
 | Seafile     | https://seafile.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
 | Immich      | https://immich.127.0.0.1.nip.io:8443  | register the first account — see below |
 | Vaultwarden | https://vault.127.0.0.1.nip.io:8443   | register the first account — see below |
+| Navidrome   | https://music.127.0.0.1.nip.io:8443   | create the first admin in the browser  |
 
 **First Immich account.** The admin-sign-up page is open until the first admin
 exists, then closes itself — no toggle needed. Open the Immich URL while the
@@ -272,6 +278,8 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
 3. **Seafile** – logs in via the token API, creates a library, uploads a file
    and reads back identical bytes (the Web API the desktop/iOS clients use).
    Encrypted libraries are created in the app, not the API.
+4. **Navidrome** – logs in with Subsonic token auth, searches for an album,
+   fetches its cover art and streams a track (the API every music client uses).
 
 ## Connecting the real clients
 
@@ -288,6 +296,31 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
   registered during setup (see [Local quick start](#local-quick-start));
   afterwards Vaultwarden is API-only, so daily use is through the extension or
   apps. Enable 2FA under Settings → Security → Two-step login.
+- **Music (Navidrome):** open your `https://music.…` once and create the admin
+  account (the page offers it only while no user exists). Then point any
+  Subsonic client at the same URL with that login — e.g. _Feishin_ (Mac,
+  Windows), _Supersonic_ (Mac, Windows), _play:Sub_, _Amperfy_ or _substreamer_
+  (iPhone). The web player works in any browser.
+
+## Music library
+
+Navidrome streams the files in the `music/` folder on the Storage Box; it never
+writes to it (the mount is read-only). Add music by copying files there — over
+SMB, SFTP or rsync, whichever the box offers — in any folder layout. Tags drive
+artist, album and track order; album art comes from a `cover.*`, `folder.*` or
+`front.*` image beside the tracks, or from the art embedded in the files.
+
+New files appear after the next scan, which runs hourly, or at once with **Scan
+library** in the web UI. Files that reach the box from another machine never
+trigger the kernel's file watcher, which is why the scan is scheduled — see the
+`navidrome` service in [docker-compose.yml](docker-compose.yml).
+
+Locally, the simulator's share is the `storagebox_data` volume:
+
+```bash
+docker run --rm -v private-cloud_storagebox_data:/s -v ~/Music:/in:ro \
+  alpine:3.20 cp -r /in/. /s/music/
+```
 
 ## Email (SMTP)
 
@@ -338,13 +371,14 @@ Verified on the live stack:
 | seafile-server               | ⚠️ **daemons uid 8000** (`NON_ROOT`); init/nginx stay root | ❌ no            |
 | notification-server          | ✅ uid 8000, zero capabilities                             | ✅ yes           |
 | immich-ml                    | ✅ uid 1000                                                | ✅ yes           |
+| navidrome                    | ✅ uid 1002, music mounted read-only                       | ✅ yes           |
 
 `seafile-server` is the one exception, and a stock-image limitation: the image
 regenerates config and runs its own nginx across the filesystem. It keeps every
 other control and drops its data daemons to a non-root uid.
 
-At the ingress, Caddy applies a shared security-header snippet to all three
-sites (HSTS, `nosniff`, a `Referrer-Policy` that keeps share-link tokens out of
+At the ingress, Caddy applies a shared security-header snippet to every
+site (HSTS, `nosniff`, a `Referrer-Policy` that keeps share-link tokens out of
 third-party `Referer` headers, `Server` stripped) and, as the edge, ignores any
 client-supplied `X-Forwarded-For` — so a forged header cannot poison the
 per-client login limiters in Immich and Vaultwarden. Directives and trade-offs
@@ -432,7 +466,7 @@ env files hold the secrets — back them up securely and separately.
 
 **Automated backup (`scripts/backup.sh`):** writes _consistent_ dumps of the
 attached-volume state (Immich's Postgres, Seafile's three MariaDB databases,
-Vaultwarden's SQLite + data folder, Caddy's TLS material) to the Storage Box,
+Vaultwarden's and Navidrome's SQLite + data folders, Caddy's TLS material) to the Storage Box,
 verifying each artifact before it replaces the previous one. It keeps a single
 latest set and **relies on the box's free snapshots for dated history** (so
 enable those); the bulk blobs are already on the box and are not re-copied.
@@ -460,7 +494,7 @@ sudo -E ./scripts/restore.sh --yes          # restore everything
 restore is worth nothing, so `--check` also runs on its own weekly timer
 (Sundays 05:00), installed by `prod-setup.sh`. It verifies checksums and gzip,
 loads the Immich dump into a throwaway scratch database, and integrity-checks
-the Vaultwarden SQLite snapshot — changing nothing live:
+the Vaultwarden and Navidrome SQLite snapshots — changing nothing live:
 
 ```bash
 systemctl list-timers pc-restore-check.timer      # next run
@@ -513,7 +547,7 @@ scripts/mount-watchdog.sh          recover a wedged CIFS mount (60s timer)
 scripts/immich-preview-mover.sh    move Immich previews to the box, symlink them back
 scripts/notify-failure.sh          mail an alert when a timer's unit fails
 scripts/harden-seafile.sh          Seahub security settings + worker count (idempotent)
-scripts/verify.sh                  the three acceptance tests + an env-file lint
+scripts/verify.sh                  the four acceptance tests + an env-file lint
 scripts/vw-test.mjs                Bitwarden-client crypto for the password test
 scripts/systemd/                   units for the backup, restore-check + watchdog timers
 AGENTS.md                          conventions + decisions for changing this repo
@@ -535,6 +569,7 @@ each keeps its own license:
 | Noodle Gallery (Immich fork)            | AGPL-3.0     |
 | Seafile Community Edition (server core) | AGPL-3.0     |
 | Vaultwarden                             | AGPL-3.0     |
+| Navidrome                               | GPL-3.0      |
 | Caddy                                   | Apache-2.0   |
 | MariaDB                                 | GPL-2.0      |
 | Valkey                                  | BSD-3-Clause |

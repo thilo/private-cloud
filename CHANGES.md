@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.6.0] — 2026-10-24
+
+### Added
+
+- Navidrome — music streaming over the Subsonic API from the `music/` folder on
+  the Storage Box, mounted read-only. An existing install needs
+  `NAVIDROME_DOMAIN`, `NAVIDROME_IMAGE` and `NAVIDROME_PASSWORD_KEY` in its env
+  file and a re-run of `prod-setup.sh` for the data directory and box folder.
+- `backup.sh` and `restore.sh` now cover Navidrome's database and artwork, and
+  `mount-watchdog.sh` its mount.
+- `verify.sh` now searches, fetches album art and streams a track from Navidrome.
+
 ## [1.5.3] — 2026-10-22
 
 ### Security
