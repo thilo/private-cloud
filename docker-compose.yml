@@ -772,9 +772,12 @@ services:
     container_name: pc-navidrome
     restart: *restart
     # Single Go process; ffmpeg runs as a child only when a client asks for a
-    # transcoded stream. Measured: 162 MiB peak, full scan of 600 tracks + 4 transcodes.
+    # transcoded stream. Measured: 89 MiB anon peak over a full scan of 625
+    # tracks + 8 concurrent transcodes.
     mem_limit: 256m
-    pids_limit: 64
+    # Each ffmpeg starts threads per visible CPU. Measured: 4 concurrent transcodes
+    # peaked at 111 with 18 CPUs, and a cap of 64 failed one of them.
+    pids_limit: 256
     # Distinct from the uid-1000 apps, for the same reason as Caddy's 1001.
     user: "1002:1002"
     environment:
