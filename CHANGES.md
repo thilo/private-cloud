@@ -3,17 +3,29 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
-## [1.6.0] — 2026-10-24
+## [1.6.0] — 2026-10-26
 
 ### Added
 
 - Navidrome — music streaming over the Subsonic API from the `music/` folder on
-  the Storage Box, mounted read-only. An existing install needs
-  `NAVIDROME_DOMAIN`, `NAVIDROME_IMAGE` and `NAVIDROME_PASSWORD_KEY` in its env
-  file and a re-run of `prod-setup.sh` for the data directory and box folder.
-- `backup.sh` and `restore.sh` now cover Navidrome's database and artwork, and
-  `mount-watchdog.sh` its mount.
-- `verify.sh` now searches, fetches album art and streams a track from Navidrome.
+  the Storage Box, mounted read-only, one library per folder below it. Instant
+  Mix and similar tracks come from what the music sounds like, through the
+  `navidrome-sonic` sidecar and its plugin, which has to be enabled once after
+  the first `up` (README, Music library). An existing install needs
+  `NAVIDROME_DOMAIN`, `NAVIDROME_VERSION`, `NAVIDROME_SONIC_VERSION`,
+  `NAVIDROME_LIBRARY` and `NAVIDROME_PASSWORD_KEY` in its env file,
+  `NAVIDROME_ADMIN_PASSWORD` in its setup file for the first `up` with
+  `docker-compose.setup.yml`, which seeds the admin, and a re-run of
+  `prod-setup.sh`.
+- `backup.sh` and `restore.sh` now cover Navidrome's database and artwork,
+  `mount-watchdog.sh` its mounts, and `verify.sh` searches, fetches album art,
+  streams a track and asks for similar ones.
+
+### Changed
+
+- `prod-setup.sh` now installs Ubuntu's HWE kernel when the running kernel lacks
+  `nls_utf8`, which the music mount needs, and skips zswap parameters the kernel
+  does not have.
 
 ## [1.5.3] — 2026-10-22
 

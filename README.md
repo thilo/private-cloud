@@ -11,8 +11,9 @@ Self-hosted replacements for the usual cloud subscriptions, in one
 - **Vaultwarden** — password manager with TOTP 2FA, compatible with the
   official **Bitwarden** apps and extensions
 - **Navidrome** — music streaming from your own MP3 library (replaces Spotify /
-  Apple Music for the music you own), with album art, search and playlists;
-  works with any Subsonic player on Mac, Windows and iPhone
+  Apple Music for the music you own), with album art, search, playlists and
+  Instant Mix from what the tracks sound like; works with any Subsonic player
+  on Mac, Windows and iPhone
 
 behind a single **Caddy** reverse proxy with automatic HTTPS. The same base
 compose file runs locally and on a real server.
@@ -49,7 +50,7 @@ what the stack does and how to run it.
        …/notification  → │    └ notification-server (real-time push, ws)      │
   https://immich.…     → │  immich-server ─ immich-db / immich-redis / -ml    │
   https://vault.…      → │  vaultwarden (sqlite)                              │
-  https://music.…      → │  navidrome (sqlite)                                │
+  https://music.…      → │  navidrome (sqlite) ─ navidrome-sonic (similarity) │
                          └────────────────────────────────────────────────────┘
    databases live on internal-only networks · only Caddy publishes host ports
 ```
@@ -151,6 +152,7 @@ the server's local SSD.
 | Seafile object store + config (`/shared/seafile`) | **Storage Box** (CIFS) | `seafile_box`                                 |
 | Seafile logs                                      | local SSD              | `seafile_logs`                                |
 | Music library (`music/`, plain files)             | **Storage Box** (CIFS) | `navidrome_music`                             |
+| Audio-similarity embeddings (rebuildable)         | local SSD              | `navidrome_sonic_data`                        |
 | All databases + Vaultwarden + Navidrome           | local SSD              | `immich_db`, `seafile_db`, `vaultwarden_data`, `navidrome_data` |
 
 **`immich-preview-mover` is optional.** Immich puts both of an asset's
@@ -199,8 +201,8 @@ docker compose -f docker-compose.yml -f docker-compose.storagebox-sim.yml \
 # Day-to-day afterwards is just:  docker compose up -d
 ```
 
-The initial Seafile admin password is a **setup-only** secret in `.env.setup`,
-which is not loaded at runtime (see
+The initial Seafile and Navidrome admin passwords are **setup-only** secrets
+in `.env.setup`, which is not loaded at runtime (see
 [Secrets: setup vs runtime](#secrets-setup-vs-runtime)). Immich and Vaultwarden
 store no admin password at all — register their first accounts in the browser.
 
@@ -212,7 +214,7 @@ automatically):
 | Seafile     | https://seafile.127.0.0.1.nip.io:8443 | `admin@example.com` / see `.env.setup` |
 | Immich      | https://immich.127.0.0.1.nip.io:8443  | register the first account — see below |
 | Vaultwarden | https://vault.127.0.0.1.nip.io:8443   | register the first account — see below |
-| Navidrome   | https://music.127.0.0.1.nip.io:8443   | create the first admin in the browser  |
+| Navidrome   | https://music.127.0.0.1.nip.io:8443   | `admin` / see `.env.setup`             |
 
 **First Immich account.** The admin-sign-up page is open until the first admin
 exists, then closes itself — no toggle needed. Open the Immich URL while the
@@ -279,7 +281,8 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
    and reads back identical bytes (the Web API the desktop/iOS clients use).
    Encrypted libraries are created in the app, not the API.
 4. **Navidrome** – logs in with Subsonic token auth, searches for an album,
-   fetches its cover art and streams a track (the API every music client uses).
+   fetches its cover art and streams a track (the API every music client uses),
+   then asks for tracks that sound like it.
 
 ## Connecting the real clients
 
@@ -296,17 +299,23 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
   registered during setup (see [Local quick start](#local-quick-start));
   afterwards Vaultwarden is API-only, so daily use is through the extension or
   apps. Enable 2FA under Settings → Security → Two-step login.
-- **Music (Navidrome):** open your `https://music.…` once and create the admin
-  account (the page offers it only while no user exists). Then point any
-  Subsonic client at the same URL with that login — e.g. _Feishin_ (Mac,
+- **Music (Navidrome):** log in at your `https://music.…` as `admin` with
+  `NAVIDROME_ADMIN_PASSWORD` from the setup file. Then point any Subsonic client
+  at the same URL with that login — e.g. _Feishin_ (Mac,
   Windows), _Supersonic_ (Mac, Windows), _play:Sub_, _Amperfy_ or _substreamer_
   (iPhone). The web player works in any browser.
 
 ## Music library
 
 Navidrome streams the files in the `music/` folder on the Storage Box; it never
-writes to it (the mount is read-only). Add music by copying files there — over
-SMB, SFTP or rsync, whichever the box offers — in any folder layout. Tags drive
+writes to it (the mount is read-only). Each library is one folder below
+`music/`: `music/${NAVIDROME_LIBRARY}/` is the default one, and further
+libraries, such as one per user or a shared one, are sibling folders added under
+**Settings → Libraries**. Access is granted per library, so an album is shared
+by moving its folder into a library the other user can open; each library's
+_default for new users_ flag decides what a new account sees. Add music by
+copying files into a library's folder — over SMB, SFTP or rsync, whichever the
+box offers — in any layout below it. Tags drive
 artist, album and track order; album art comes from a `cover.*`, `folder.*` or
 `front.*` image beside the tracks, or from the art embedded in the files.
 
@@ -315,11 +324,26 @@ library** in the web UI. Files that reach the box from another machine never
 trigger the kernel's file watcher, which is why the scan is scheduled — see the
 `navidrome` service in [docker-compose.yml](docker-compose.yml).
 
+**Similar tracks.** `navidrome-sonic` analyses every track once with the
+MusicNN model LMS uses, and the `sonic` plugin feeds the result into Navidrome:
+Instant Mix in the web UI, `getSimilarSongs2` and the OpenSubsonic
+`getSonicSimilarTracks` / `findSonicPath` calls. New files are analysed in the
+same hourly rhythm as the library scan; until a track is analysed, Instant Mix
+falls back to Navidrome's other agents. Navidrome loads the plugin disabled, so
+enable it once after the first start (and again whenever the plugin itself
+changes, which Navidrome detects by its hash):
+
+```bash
+docker compose exec navidrome navidrome plugin edit sonic --all-libraries
+docker compose exec navidrome navidrome plugin enable sonic
+docker compose restart navidrome
+```
+
 Locally, the simulator's share is the `storagebox_data` volume:
 
 ```bash
 docker run --rm -v private-cloud_storagebox_data:/s -v ~/Music:/in:ro \
-  alpine:3.20 cp -r /in/. /s/music/
+  alpine:3.20 cp -r /in/. /s/music/owner/
 ```
 
 ## Email (SMTP)
@@ -372,6 +396,7 @@ Verified on the live stack:
 | notification-server          | ✅ uid 8000, zero capabilities                             | ✅ yes           |
 | immich-ml                    | ✅ uid 1000                                                | ✅ yes           |
 | navidrome                    | ✅ uid 1002, music mounted read-only                       | ✅ yes           |
+| navidrome-sonic              | ✅ uid 1002, music read-only, internal network only        | ✅ yes           |
 
 `seafile-server` is the one exception, and a stock-image limitation: the image
 regenerates config and runs its own nginx across the filesystem. It keeps every
@@ -432,19 +457,19 @@ never include human-account passwords:
 | ------------------- | -------------------------------------------- | --------------------------------------------------- |
 | File (local / prod) | `.env` / `/root/.env.production`             | `.env.setup` / `/root/.env.production.setup`        |
 | Loaded by           | Compose, on **every** `up`                   | only `init.sh`, `verify.sh`, and the **first** `up` |
-| Contents            | DB / Redis / Storage Box / JWT machine creds | the first Seafile admin account                     |
+| Contents            | DB / Redis / Storage Box / JWT machine creds | the first Seafile and Navidrome admin accounts      |
 
 `scripts/init.sh` generates both (each `chmod 600`, both gitignored). The base
 `docker-compose.yml` never references the setup file, so a normal `up` puts no
-admin credentials into any container: Seafile's first-boot seeding vars live in
-`docker-compose.setup.yml`, applied only on the first `up`. That overlay also
+admin credentials into any container: Seafile's and Navidrome's first-boot
+seeding vars live in `docker-compose.setup.yml`, applied only on the first `up`. That overlay also
 opens Vaultwarden's signups and web vault for that one run. Immich and
 Vaultwarden admins are registered in the browser, so they appear in neither
 file.
 
 Once your accounts exist, the secret of record is the account itself: **store
 the admin passwords in Vaultwarden** and remove the setup file from the server.
-Runtime never reads it; `verify.sh`'s Seafile login does, so point
+Runtime never reads it; `verify.sh`'s Seafile and Navidrome logins do, so point
 `SETUP_ENV_FILE` at a copy for that run. Keep both files in your offline backup;
 losing the runtime file means losing the DB/JWT/box credentials.
 
@@ -561,8 +586,9 @@ This repository — the compose files, `Caddyfile`, scripts and docs — is
 [MIT licensed](LICENSE).
 
 That covers the orchestration only. The applications it runs are separate
-projects, pulled as prebuilt container images and never redistributed here;
-each keeps its own license:
+projects, pulled as prebuilt container images (`navidrome-sonic` is built on
+the host from its repository) and never redistributed here; each keeps its own
+license:
 
 | Component                               | License      |
 | --------------------------------------- | ------------ |
@@ -570,6 +596,7 @@ each keeps its own license:
 | Seafile Community Edition (server core) | AGPL-3.0     |
 | Vaultwarden                             | AGPL-3.0     |
 | Navidrome                               | GPL-3.0      |
+| navidrome-sonic                         | GPL-3.0      |
 | Caddy                                   | Apache-2.0   |
 | MariaDB                                 | GPL-2.0      |
 | Valkey                                  | BSD-3-Clause |

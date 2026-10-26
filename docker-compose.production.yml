@@ -22,8 +22,10 @@
 #                              TLS material (must persist — re-issuing hits LE
 #                              rate limits) + the ML model cache + Navidrome's
 #                              SQLite DB and cache.
-#   on the host root disk   -> seafile_logs (chatty per-request logs) stays a
-#                              plain named volume; tmpfs handles scratch.
+#   on the host root disk   -> seafile_logs (chatty per-request logs) and the
+#                              rebuildable navidrome_sonic_data and
+#                              navidrome_plugins stay plain named volumes; tmpfs
+#                              handles scratch.
 #   on the Storage Box      -> immich_data, seafile_box, navidrome_music (defined
 #                              in the base file).
 

@@ -6,7 +6,8 @@
 #   sudo -E ./scripts/prod-setup.sh
 #
 # It:
-#   1. installs cifs-utils (needed to mount the Storage Box over SMB/CIFS),
+#   1. installs cifs-utils (needed to mount the Storage Box over SMB/CIFS) and,
+#      when the kernel lacks nls_utf8, Ubuntu's HWE kernel,
 #   2. adds a 2 GB swap file if the host has none (safety net on a 4 GB box),
 #   3. creates the per-volume directories on the attached volume (${DATA_ROOT}),
 #   4. creates + validates the immich/ and seafile/ subfolders on the Storage Box
@@ -29,7 +30,7 @@ set -a; . "$ENV_FILE"; set +a
 
 if [[ $EUID -ne 0 ]]; then echo "Run as root (sudo -E $0)." >&2; exit 1; fi
 
-echo "==> [1/10] cifs-utils + sqlite3 + jq (sqlite3 = consistent Vaultwarden backups)"
+echo "==> [1/10] cifs-utils + sqlite3 + jq (sqlite3 = consistent Vaultwarden backups) + nls_utf8"
 need=()
 command -v mount.cifs >/dev/null 2>&1 || need+=(cifs-utils)
 command -v sqlite3   >/dev/null 2>&1 || need+=(sqlite3)
@@ -41,6 +42,31 @@ if [[ ${#need[@]} -eq 0 ]]; then
 else
   apt-get update -qq && apt-get install -y -qq "${need[@]}"
   echo "    installed: ${need[*]}"
+fi
+
+# navidrome_music mounts with iocharset=utf8 (docker-compose.yml says why), which fails
+# without the kernel's nls_utf8. Ubuntu's GA cloud kernel keeps it in
+# linux-modules-extra; the HWE kernel ships it in its base modules and its meta
+# package follows kernel updates.
+has_nls_utf8() { modinfo -k "$1" nls_utf8 >/dev/null 2>&1; }
+newest_kernel() { ls /lib/modules | sort -V | tail -n1; }
+reboot_needed=0
+if has_nls_utf8 "$(uname -r)"; then
+  echo "    nls_utf8 available."
+else
+  if ! has_nls_utf8 "$(newest_kernel)"; then
+    hwe="linux-image-virtual-hwe-$(. /etc/os-release && echo "$VERSION_ID")"
+    apt-get update -qq
+    if ! apt-cache show "$hwe" >/dev/null 2>&1; then
+      echo "    kernel $(uname -r) has no nls_utf8 and there is no $hwe;" >&2
+      echo "    install a kernel that ships the module, then re-run." >&2
+      exit 1
+    fi
+    apt-get install -y -qq "$hwe"
+    has_nls_utf8 "$(newest_kernel)" || { echo "    $hwe installed but has no nls_utf8." >&2; exit 1; }
+    echo "    installed $hwe."
+  fi
+  reboot_needed=1
 fi
 
 echo "==> [2/10] swap"
@@ -62,7 +88,7 @@ for d in caddy_data vaultwarden_data immich_db immich_modelcache \
 done
 echo "    created: ${DATA_ROOT}/{caddy_data,vaultwarden_data,immich_db,immich_modelcache,immich_thumbs,immich_encoded,seafile_db,seafile_data,navidrome_data}"
 
-echo "==> [4/10] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile,music})"
+echo "==> [4/10] Storage Box subfolders (//${SB_HOST}/${SB_SHARE}/{immich,seafile,music/${NAVIDROME_LIBRARY}})"
 if [[ -z "${SB_PASSWORD:-}" || "$SB_PASSWORD" == "CHANGEME" ]]; then
   echo "    SB_PASSWORD is not set in ${ENV_FILE} — set it, then re-run." >&2
   exit 1
@@ -71,16 +97,20 @@ tmpmnt="$(mktemp -d)"
 trap 'umount "$tmpmnt" 2>/dev/null || true; rmdir "$tmpmnt" 2>/dev/null || true' EXIT
 mount -t cifs "//${SB_HOST}/${SB_SHARE}" "$tmpmnt" \
   -o "username=${SB_USER},password=${SB_PASSWORD},vers=${SB_SMB_VERS},seal"
-mkdir -p "$tmpmnt/immich" "$tmpmnt/seafile" "$tmpmnt/music"
-echo "    Storage Box reachable; immich/, seafile/ and music/ present."
+mkdir -p "$tmpmnt/immich" "$tmpmnt/seafile" "$tmpmnt/music/${NAVIDROME_LIBRARY:?}"
+echo "    Storage Box reachable; immich/, seafile/ and music/${NAVIDROME_LIBRARY}/ present."
 
 echo "==> [5/10] zswap (compress swap pages in RAM, reduce swapfile I/O)"
 # zswap's zpool/compressor are module params, not sysctls: this write covers the
 # running kernel, the cmdline below covers every boot after.
+# Kernels from 6.15 on have no zpool parameter: zsmalloc is their only pool.
 zswap_params=(enabled=Y zpool=zsmalloc compressor=lzo-rle)
+cmdline=()
 for p in "${zswap_params[@]}"; do
   key="${p%%=*}"; want="${p#*=}"
   sysfs="/sys/module/zswap/parameters/${key}"
+  [[ -e "$sysfs" ]] || { echo "    zswap.${key} not in this kernel — skipping."; continue; }
+  if [[ "$want" == Y ]]; then cmdline+=("zswap.${key}=1"); else cmdline+=("zswap.${key}=${want}"); fi
   [[ -w "$sysfs" ]] || { echo "    $sysfs not writable — skipping." >&2; continue; }
   if [[ "$(cat "$sysfs")" == "$want" ]]; then
     echo "    zswap.${key} already $want."
@@ -90,17 +120,17 @@ for p in "${zswap_params[@]}"; do
   fi
 done
 
-# Persist the same three on the kernel cmdline. grub-mkconfig sources
+# Persist the same parameters on the kernel cmdline. grub-mkconfig sources
 # /etc/default/grub.d/*.cfg after /etc/default/grub, so a drop-in appends to the
 # cmdline without editing the distro's file. Params repeat harmlessly if that
 # file already sets one — for module params the last occurrence wins.
 grub_dropin=/etc/default/grub.d/99-private-cloud.cfg
 grub_before="$(cat "$grub_dropin" 2>/dev/null || true)"
 mkdir -p "$(dirname "$grub_dropin")"
-cat > "$grub_dropin" <<'EOF'
+cat > "$grub_dropin" <<EOF
 # zsmalloc packs more than two compressed pages per frame and lzo-rle handles
 # byte runs; together they measured ~20% less pool than the kernel's zbud/lzo.
-GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT zswap.enabled=1 zswap.zpool=zsmalloc zswap.compressor=lzo-rle"
+GRUB_CMDLINE_LINUX_DEFAULT="\$GRUB_CMDLINE_LINUX_DEFAULT ${cmdline[*]}"
 EOF
 if [[ "$grub_before" == "$(cat "$grub_dropin")" ]]; then
   echo "    $grub_dropin unchanged."
@@ -236,4 +266,8 @@ else
 fi
 
 echo
-echo "Host prepared. Next:  source scripts/prod.env && docker compose up -d"
+if (( reboot_needed )); then
+  echo "Host prepared. Reboot onto kernel $(newest_kernel) first: the music mount needs its nls_utf8."
+else
+  echo "Host prepared. Next:  source scripts/prod.env && docker compose up -d"
+fi

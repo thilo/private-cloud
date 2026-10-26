@@ -28,6 +28,7 @@ CHECKS=(  # container : path under the CIFS mount to stat
   "pc-immich-server:/data/library"
   "pc-immich-preview-mover:/data/library"  # holds the same mount; previews/ may not exist yet
   "pc-navidrome:/music"
+  "pc-navidrome-sonic:/music"
 )
 STATE=/run/pc-mount-watchdog.state  # "<epoch of last bounce> <consecutive attempts>"
 COOLDOWN=300; RECOVERY_ATTEMPTS=3

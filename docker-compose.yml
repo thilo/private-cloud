@@ -42,6 +42,9 @@ networks:
   # immich-server <-> immich-ml only. NOT internal: ML downloads models on first
   # use. Keeps the unauthenticated ML API off the shared proxy bridge.
   ml: {}
+  # navidrome <-> navidrome-sonic only. The sidecar's API has no authentication.
+  sonic:
+    internal: true
 
 volumes:
   caddy_data:
@@ -57,6 +60,10 @@ volumes:
   immich_thumbs: # Immich thumbnails (read on every grid/scroll)
   immich_encoded: # Immich transcoded video
   navidrome_data: # Navidrome SQLite DB (users, playlists, play counts) + art/transcode cache
+  # MusicNN embeddings per track. Not backed up: navidrome-sonic rebuilds them from
+  # the library on its own, and they hold nothing a person entered.
+  navidrome_sonic_data:
+  navidrome_plugins: # sonic.ndp, copied in by navidrome-sonic on every start
 
   # Storage Box — cheap bulk blobs over CIFS/SMB. ${SB_*} come from .env.
   #   LOCAL : docker-compose.storagebox-sim.yml runs a Samba server at ${SB_HOST}.
@@ -72,13 +79,12 @@ volumes:
   # noexec,nosuid,nodev: the shares hold only blobs, config, avatars and music,
   # never executables. Like any driver_opts change, applying these needs a
   # `docker volume rm` + recreate.
-  # iocharset is intentionally NOT set: without it CIFS maps filenames with the
-  # kernel's CONFIG_NLS_DEFAULT, which Ubuntu builds as utf8, so Unicode names
-  # round-trip correctly. (Docker Desktop's kernel defaults to iso8859-1;
-  # docker-compose.storagebox-sim.yml covers that.) An explicit iocharset=utf8
-  # would instead require the nls_utf8 kernel module, which minimal cloud kernels
-  # (e.g. Ubuntu's -virtual flavor) do not ship — that mount fails with a
-  # misleading "can not access a needed shared library" error.
+  # iocharset=utf8 (navidrome_music only): without it CIFS loads the kernel's
+  # default NLS and, when that module is not installed, falls back to a built-in
+  # Latin-1 table. A name macOS wrote in decomposed form ("u" + combining mark)
+  # then arrives with a literal "?" and cannot be opened. The option needs the
+  # nls_utf8 module, which prod-setup.sh checks for. The other shares hold only
+  # ASCII names their apps generate.
   # nostrictsync (immich_data only): skip the server-side flush on fsync(). Photo
   # ingest is many small write+fsync bursts where the round-trip to the box — not
   # raw throughput — is the tax, so dropping the per-file flush is a documented
@@ -108,7 +114,7 @@ volumes:
     driver_opts:
       type: cifs
       device: "//${SB_HOST}/${SB_SHARE}/music"
-      o: "username=${SB_USER},password=${SB_PASSWORD},addr=${SB_HOST},uid=1002,gid=1002,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,noexec,nosuid,nodev"
+      o: "username=${SB_USER},password=${SB_PASSWORD},addr=${SB_HOST},uid=1002,gid=1002,file_mode=0700,dir_mode=0700,vers=${SB_SMB_VERS},cache=loose,nobrl,seal,noexec,nosuid,nodev,iocharset=utf8"
 
 services:
   # --------------------------------------------------------------- ingress --
@@ -186,11 +192,13 @@ services:
       [
         "sh",
         "-c",
-        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs && chown -R 1002:1002 /navidrome-data",
+        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs && chown -R 1002:1002 /navidrome-data /navidrome-sonic-data /navidrome-plugins",
       ]
     volumes:
       - vaultwarden_data:/vw
       - navidrome_data:/navidrome-data
+      - navidrome_sonic_data:/navidrome-sonic-data
+      - navidrome_plugins:/navidrome-plugins
       - immich_thumbs:/immich-thumbs
       - immich_encoded:/immich-encoded
       - immich_modelcache:/immich-modelcache
@@ -768,7 +776,7 @@ services:
   # on the Storage Box; Navidrome indexes it and reads album art from the tags or
   # a cover.* file beside the tracks.
   navidrome:
-    image: ${NAVIDROME_IMAGE}
+    image: deluan/navidrome:${NAVIDROME_VERSION}
     container_name: pc-navidrome
     restart: *restart
     # Single Go process; ffmpeg runs as a child only when a client asks for a
@@ -781,7 +789,10 @@ services:
     # Distinct from the uid-1000 apps, for the same reason as Caddy's 1001.
     user: "1002:1002"
     environment:
-      ND_MUSICFOLDER: /music
+      # Library 1. Navidrome resets its path to this on every start; more libraries
+      # are added in the web UI as siblings under /music, never nested, since a
+      # nested one would index the same files twice.
+      ND_MUSICFOLDER: /music/${NAVIDROME_LIBRARY:?}
       ND_DATAFOLDER: /data
       # The watcher relies on inotify, which never fires for files that reach the
       # box over SMB/SFTP from another machine. A scheduled quick scan picks them
@@ -792,6 +803,13 @@ services:
       # encrypted. Unset, the key is a constant compiled into every build.
       ND_PASSWORDENCRYPTIONKEY: ${NAVIDROME_PASSWORD_KEY}
       ND_ENABLEINSIGHTSCOLLECTOR: "false"
+      # The sonic plugin (from navidrome-sonic) serves getSonicSimilarTracks and
+      # findSonicPath. As the first agent it also answers Instant Mix
+      # (getSimilarSongs2); for a track it has no answer for, the stock agents
+      # that follow it take over.
+      ND_PLUGINS_ENABLED: "true"
+      ND_PLUGINS_FOLDER: /plugins
+      ND_AGENTS: sonic,deezer,lastfm,listenbrainz
       # ND_EXTAUTH_TRUSTEDSOURCES stays unset. Setting it would let Navidrome read
       # the client IP from X-Forwarded-For, but it also accepts a Remote-User
       # header as a login from those sources — and every container on the proxy
@@ -802,11 +820,16 @@ services:
       # :ro — Navidrome only reads the library; files are added on the box itself.
       - navidrome_music:/music:ro
       - navidrome_data:/data
+      - navidrome_plugins:/plugins:ro
     networks:
       - proxy
+      - sonic
     depends_on:
       volume-init:
         condition: service_completed_successfully
+      # Healthy means sonic.ndp is in place; plugins are discovered at startup.
+      navidrome-sonic:
+        condition: service_healthy
     read_only: true
     # noexec/nosuid/nodev: ffmpeg is on the rootfs; /tmp is only its scratch.
     tmpfs:
@@ -822,6 +845,58 @@ services:
         [
           "CMD-SHELL",
           "curl -fsS --max-time 5 http://127.0.0.1:4533/ping >/dev/null 2>&1 && timeout 8 ls /music >/dev/null 2>&1",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+  # ------------------------------------------------------- navidrome-sonic --
+  # Audio-similarity recommendations for Navidrome
+  # (https://github.com/thilo/navidrome-sonic). Each hour it walks the library,
+  # runs every new or changed file through the MusicNN model LMS uses (one thread)
+  # and keeps the embeddings in SQLite on local disk; Navidrome's sonic plugin,
+  # which the image copies into navidrome_plugins, queries it over the internal
+  # network. Built on the host; the versioned tag makes `up` build a new release.
+  navidrome-sonic:
+    build: https://github.com/thilo/navidrome-sonic.git#v${NAVIDROME_SONIC_VERSION}
+    image: pc-navidrome-sonic:${NAVIDROME_SONIC_VERSION}
+    container_name: pc-navidrome-sonic
+    restart: *restart
+    # python runs as PID 1 and never reaps orphans; the healthcheck's busybox
+    # timeout leaves one per run, which would fill pids_limit.
+    init: true
+    # Measured: 113 MiB anon peak over a full analysis of 649 tracks, 45 MiB idle.
+    mem_limit: 192m
+    # Measured peak: 31.
+    pids_limit: 64
+    # Below the default CPU weight under either of Docker's cpu_shares rescales
+    # (see immich-ml), so analysis yields to the other services and still uses
+    # idle CPU.
+    cpu_shares: 256
+    # Navidrome's uid: the music mount presents its files as 0700 to uid 1002.
+    user: "1002:1002"
+    volumes:
+      - navidrome_music:/music:ro
+      - navidrome_sonic_data:/data
+      - navidrome_plugins:/plugins
+    networks:
+      - sonic
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Also list the Storage Box CIFS mount, as for navidrome.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)\" && timeout 8 ls /music >/dev/null 2>&1",
         ]
       interval: 30s
       timeout: 15s

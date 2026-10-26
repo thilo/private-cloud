@@ -1,8 +1,8 @@
 # Setup overlay — apply ONLY for the first `up` (initial provisioning).
 #
 # Seafile reads these INIT_* vars on first boot to seed the admin account and to
-# create its databases/users (using the MySQL root password). After that they are
-# ignored — so they are kept OUT of the base file's long-running `environment:`,
+# create its databases/users (using the MySQL root password); Navidrome reads its
+# admin password the same way. After that they are ignored — so they are kept OUT of the base file's long-running `environment:`,
 # where they would otherwise sit in `docker inspect pc-seafile` forever. They are
 # supplied here, transiently, and resolved from the SETUP env file (.env.setup /
 # .env.production.setup) which Compose does NOT load at runtime.
@@ -40,3 +40,11 @@ services:
       # and returns Vaultwarden to API-only.
       SIGNUPS_ALLOWED: "true"
       WEB_VAULT_ENABLED: "true"
+
+  navidrome:
+    environment:
+      # Creates the admin "admin" with this password, only while the database has
+      # never been set up; this closes the open first-user page. Navidrome logs
+      # the password once when it does; the log goes with the container on the
+      # next plain `up`.
+      ND_DEVAUTOCREATEADMINPASSWORD: ${NAVIDROME_ADMIN_PASSWORD}

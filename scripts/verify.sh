@@ -6,11 +6,12 @@
 #                   + real-time push: a websocket upgrade on the URL Seafile
 #                     advertises, and the sidecar reachable from the server
 #   4. Navidrome  — browse, search, album art and a stream (Subsonic API, which
-#                   the desktop and iOS players use)
+#                   the desktop and iOS players use) + sonic similarity through
+#                   the navidrome-sonic plugin
 set -uo pipefail
 cd "$(dirname "$0")/.."
-# Runtime config lives in the runtime env file; the Seafile admin secret lives in
-# the setup file (see README "Secrets: setup vs runtime"). Immich's admin is NOT
+# Runtime config lives in the runtime env file; the Seafile and Navidrome admin
+# secrets live in the setup file (see README "Secrets: setup vs runtime"). Immich's admin is NOT
 # in any file — its first account is created in the browser, so the Immich test
 # below always prompts for its email + password.
 RUNTIME_ENV="${ENV_FILE:-./.env}"
@@ -58,7 +59,7 @@ set -a
 . "$RUNTIME_ENV"
 [[ -f "$SETUP_ENV" ]] && . "$SETUP_ENV"
 set +a
-[[ -f "$SETUP_ENV" ]] || echo "  ! setup file $SETUP_ENV not found — the Seafile admin login will fail (run ./scripts/init.sh or set SETUP_ENV_FILE)." >&2
+[[ -f "$SETUP_ENV" ]] || echo "  ! setup file $SETUP_ENV not found — the Seafile and Navidrome admin logins will fail (run ./scripts/init.sh or set SETUP_ENV_FILE)." >&2
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
@@ -252,13 +253,13 @@ fi
 # ---------------------------------------------------------------- Navidrome --
 echo "[4/4] Navidrome — stream music (Subsonic API used by the desktop/iOS players)"
 nd() { curl -sS -k --resolve "${NAVIDROME_DOMAIN}:${HTTPS_PORT}:${R}" "$@"; }
-# Like Immich, the first admin is created in the browser and stored in no file.
-# The web app's embedded config says whether that has happened yet.
+# The setup overlay seeds the admin on the first `up`; the web app's embedded
+# config says whether an admin exists yet.
 if [[ "$(nd "${ND_BASE}/app/" 2>/dev/null)" == *'firstTime\":true'* ]]; then
-  info "Navidrome has no admin yet — create it in the browser at ${ND_BASE}, then re-run verify.sh for the music test. Skipping."
+  info "Navidrome has no admin yet — the first \`up\` with docker-compose.setup.yml seeds it. Skipping."
 else
-  read -r -p "    Navidrome admin username: " ND_USER
-  read -r -s -p "    Navidrome admin password (input hidden): " ND_PASS; echo
+  ND_USER=admin
+  ND_PASS="${NAVIDROME_ADMIN_PASSWORD:-}"
   # Subsonic token auth, as the clients send it: md5(password + salt).
   nd_salt=$(openssl rand -hex 6)
   nd_tok=$(printf '%s' "${ND_PASS}${nd_salt}" | openssl md5 | awk '{print $NF}')
@@ -272,7 +273,7 @@ else
     album=$(nd "${nda[@]}" -d type=random -d size=1 "${ND_BASE}/rest/getAlbumList2" \
       | ndj '"\t".join((lambda a: [a["id"], a.get("coverArt", ""), a["name"]])(r["albumList2"]["album"][0]))')
     if [[ -z "$album" ]]; then
-      info "the library is empty — copy music into the box's music/ folder and run a scan. Skipping the rest."
+      info "the library is empty — copy music into the box's music/${NAVIDROME_LIBRARY}/ folder and run a scan. Skipping the rest."
     else
       IFS=$'\t' read -r al_id al_art al_name <<<"$album"
       hits=$(nd "${nda[@]}" --data-urlencode "query=${al_name}" "${ND_BASE}/rest/search3" | ndj 'len(r["searchResult3"].get("album", []))')
@@ -282,6 +283,18 @@ else
       song=$(nd "${nda[@]}" -d "id=${al_id}" "${ND_BASE}/rest/getAlbum" | ndj 'r["album"]["song"][0]["id"]')
       st=$(nd "${nda[@]}" -d "id=${song}" -H 'Range: bytes=0-65535' -o /dev/null -w '%{http_code} %{content_type}' "${ND_BASE}/rest/stream")
       if [[ "$st" == 20[06]" audio/"* ]]; then ok "streamed a track (${st#* })"; else no "stream: ${st}"; fi
+      # 404 without a body: no plugin offers the capability, i.e. sonic is not enabled.
+      sim=$(nd "${nda[@]}" -d "id=${song}" -d count=5 -w '\n%{http_code}' "${ND_BASE}/rest/getSonicSimilarTracks")
+      if [[ "${sim##*$'\n'}" == 404 ]]; then
+        no "sonic similarity is off — enable the sonic plugin (README, Music library)"
+      else
+        n=$(ndj 'len(r.get("sonicMatch", [])) if r["status"] == "ok" else r["error"]["message"]' <<<"${sim%$'\n'*}")
+        case "$n" in
+          [0-9]*) ok "sonic similarity: ${n} tracks similar to the streamed one" ;;
+          *"not analysed"*) info "navidrome-sonic has not analysed the streamed track yet — re-run after its first pass" ;;
+          *) no "sonic similarity: ${n}" ;;
+        esac
+      fi
     fi
   fi
 fi

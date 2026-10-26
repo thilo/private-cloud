@@ -22,6 +22,8 @@ Always-apply rules not covered by AGENTS.md. The incidents behind them live in m
 
 - One line for the change; changed entries mark the delta with "now". Add a reason only
   when the reader can't infer it and no comment beside the setting already carries it.
+- Keep it high-level: what changed for the reader; the mechanism stays in commits and
+  comments. Fixes made while a feature was still unreleased fold into its entry.
 - No non-changes ("X was already current"); report those in the reply instead.
 - A version bump is old version → new version. Don't copy older entries as precedent;
   they predate these rules.
