@@ -95,10 +95,13 @@ mv -f "$vwtmp" "$DEST/vaultwarden.tar.gz"
 
 # 4. Navidrome — users, playlists, play counts and stars in the DB, plus artwork/,
 # which holds uploaded images the music folder has no copy of. cache/ is rebuilt.
+# A running scan adds images to artwork/hashed/ while tar reads it; tar reports
+# that as exit 1, which leaves every other file intact, so only 2+ fails.
 log "dumping navidrome.tar.gz ..."
 ND="$DATA_ROOT/navidrome_data"
 stage="$WORK/navidrome_data"; mkdir -p "$stage"
-( cd "$ND" && tar cf - --exclude='navidrome.db*' --exclude='./cache' . ) | ( cd "$stage" && tar xf - )
+( cd "$ND" && { tar cf - --warning=no-file-changed --exclude='navidrome.db*' --exclude='./cache' . || [[ $? -eq 1 ]]; } ) \
+  | ( cd "$stage" && tar xf - )
 sqlite3 "$ND/navidrome.db" ".backup '$stage/navidrome.db'" || fail "navidrome: sqlite .backup failed"
 ndtmp="$DEST/.navidrome.tar.gz.partial"
 tar czf "$ndtmp" -C "$stage" . || { rm -f "$ndtmp"; fail "navidrome: tar failed"; }
