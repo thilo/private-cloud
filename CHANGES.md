@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.6.1] — 2026-11-02
+
+### Changed
+
+- `navidrome-sonic` `0.1.0` → `0.2.0`, which decodes audio for analysis with less CPU.
+
 ## [1.6.0] — 2026-10-26
 
 ### Added
