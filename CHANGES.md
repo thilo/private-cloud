@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.7.0] — 2026-11-03
+
+### Added
+
+- Weekly mood playlists per Navidrome user, from `navidrome-sonic` `0.2.0` →
+  `0.3.0`. The first start re-analyses the library, and the plugin has to be
+  enabled again, now for all users (see its release notes).
+
 ## [1.6.1] — 2026-11-02
 
 ### Changed

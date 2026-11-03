@@ -11,9 +11,9 @@ Self-hosted replacements for the usual cloud subscriptions, in one
 - **Vaultwarden** — password manager with TOTP 2FA, compatible with the
   official **Bitwarden** apps and extensions
 - **Navidrome** — music streaming from your own MP3 library (replaces Spotify /
-  Apple Music for the music you own), with album art, search, playlists and
-  Instant Mix from what the tracks sound like; works with any Subsonic player
-  on Mac, Windows and iPhone
+  Apple Music for the music you own), with album art, search, playlists, and
+  Instant Mix and mood playlists from what the tracks sound like; works with any
+  Subsonic player on Mac, Windows and iPhone
 
 behind a single **Caddy** reverse proxy with automatic HTTPS. The same base
 compose file runs locally and on a real server.
@@ -324,20 +324,13 @@ library** in the web UI. Files that reach the box from another machine never
 trigger the kernel's file watcher, which is why the scan is scheduled — see the
 `navidrome` service in [docker-compose.yml](docker-compose.yml).
 
-**Similar tracks.** `navidrome-sonic` analyses every track once with the
-MusicNN model LMS uses, and the `sonic` plugin feeds the result into Navidrome:
-Instant Mix in the web UI, `getSimilarSongs2` and the OpenSubsonic
-`getSonicSimilarTracks` / `findSonicPath` calls. New files are analysed in the
-same hourly rhythm as the library scan; until a track is analysed, Instant Mix
-falls back to Navidrome's other agents. Navidrome loads the plugin disabled, so
-enable it once after the first start (and again whenever the plugin itself
-changes, which Navidrome detects by its hash):
-
-```bash
-docker compose exec navidrome navidrome plugin edit sonic --all-libraries
-docker compose exec navidrome navidrome plugin enable sonic
-docker compose restart navidrome
-```
+**Similar tracks and mood playlists.**
+[navidrome-sonic](https://github.com/thilo/navidrome-sonic) analyses the
+library and serves Instant Mix and per-user mood playlists through its `sonic`
+plugin. Navidrome loads the plugin disabled; enable it after the first start and
+after every plugin update, as
+[Enabling the plugin](https://github.com/thilo/navidrome-sonic#enabling-the-plugin)
+describes.
 
 Locally, the simulator's share is the `storagebox_data` volume:
 
@@ -590,16 +583,16 @@ projects, pulled as prebuilt container images (`navidrome-sonic` is built on
 the host from its repository) and never redistributed here; each keeps its own
 license:
 
-| Component                               | License      |
-| --------------------------------------- | ------------ |
-| Noodle Gallery (Immich fork)            | AGPL-3.0     |
-| Seafile Community Edition (server core) | AGPL-3.0     |
-| Vaultwarden                             | AGPL-3.0     |
-| Navidrome                               | GPL-3.0      |
-| navidrome-sonic                         | GPL-3.0      |
-| Caddy                                   | Apache-2.0   |
-| MariaDB                                 | GPL-2.0      |
-| Valkey                                  | BSD-3-Clause |
+| Component                               | License                         |
+| --------------------------------------- | ------------------------------- |
+| Noodle Gallery (Immich fork)            | AGPL-3.0                        |
+| Seafile Community Edition (server core) | AGPL-3.0                        |
+| Vaultwarden                             | AGPL-3.0                        |
+| Navidrome                               | GPL-3.0                         |
+| navidrome-sonic                         | GPL-3.0; models CC BY-NC-SA 4.0 |
+| Caddy                                   | Apache-2.0                      |
+| MariaDB                                 | GPL-2.0                         |
+| Valkey                                  | BSD-3-Clause                    |
 
 Running those images does not put your copy of this configuration under their
 terms, but modifying and distributing the applications themselves does.

@@ -60,8 +60,8 @@ volumes:
   immich_thumbs: # Immich thumbnails (read on every grid/scroll)
   immich_encoded: # Immich transcoded video
   navidrome_data: # Navidrome SQLite DB (users, playlists, play counts) + art/transcode cache
-  # MusicNN embeddings per track. Not backed up: navidrome-sonic rebuilds them from
-  # the library on its own, and they hold nothing a person entered.
+  # Embeddings and mood scores per track. Not backed up: navidrome-sonic rebuilds
+  # them from the library on its own, and they hold nothing a person entered.
   navidrome_sonic_data:
   navidrome_plugins: # sonic.ndp, copied in by navidrome-sonic on every start
 
@@ -806,7 +806,7 @@ services:
       # The sonic plugin (from navidrome-sonic) serves getSonicSimilarTracks and
       # findSonicPath. As the first agent it also answers Instant Mix
       # (getSimilarSongs2); for a track it has no answer for, the stock agents
-      # that follow it take over.
+      # that follow it take over. It also writes each user's weekly mood playlists.
       ND_PLUGINS_ENABLED: "true"
       ND_PLUGINS_FOLDER: /plugins
       ND_AGENTS: sonic,deezer,lastfm,listenbrainz
@@ -854,10 +854,10 @@ services:
   # ------------------------------------------------------- navidrome-sonic --
   # Audio-similarity recommendations for Navidrome
   # (https://github.com/thilo/navidrome-sonic). Each hour it walks the library,
-  # runs every new or changed file through the MusicNN model LMS uses (one thread)
-  # and keeps the embeddings in SQLite on local disk; Navidrome's sonic plugin,
-  # which the image copies into navidrome_plugins, queries it over the internal
-  # network. Built on the host; the versioned tag makes `up` build a new release.
+  # analyses every new or changed file (one thread) and keeps the results in
+  # SQLite on local disk; Navidrome's sonic plugin, which the image copies into
+  # navidrome_plugins, queries it over the internal network. Built on the host;
+  # the versioned tag makes `up` build a new release.
   navidrome-sonic:
     build: https://github.com/thilo/navidrome-sonic.git#v${NAVIDROME_SONIC_VERSION}
     image: pc-navidrome-sonic:${NAVIDROME_SONIC_VERSION}
@@ -866,7 +866,7 @@ services:
     # python runs as PID 1 and never reaps orphans; the healthcheck's busybox
     # timeout leaves one per run, which would fill pids_limit.
     init: true
-    # Measured: 113 MiB anon peak over a full analysis of 649 tracks, 45 MiB idle.
+    # Measured: 116 MiB anon peak over a full analysis of 676 files, 62 MiB idle.
     mem_limit: 192m
     # Measured peak: 31.
     pids_limit: 64
