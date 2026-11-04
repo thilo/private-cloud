@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.8.0] — 2026-11-04
+
+### Added
+
+- Music upload page at `https://music.…/upload/` from
+  [navidrome-upload](https://github.com/thilo/navidrome-upload) `0.1.1`, for
+  Navidrome admins with their Navidrome login: resumable uploads of audio files,
+  folders or zip archives, tagged and filed by beets without duplicates, then
+  scanned.
+
 ## [1.7.0] — 2026-11-03
 
 ### Added

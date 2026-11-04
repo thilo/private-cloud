@@ -64,6 +64,9 @@ volumes:
   # them from the library on its own, and they hold nothing a person entered.
   navidrome_sonic_data:
   navidrome_plugins: # sonic.ndp, copied in by navidrome-sonic on every start
+  # Uploads waiting for import; navidrome-upload caps it and empties it after
+  # each import. Not backed up.
+  navidrome_upload_staging:
 
   # Storage Box — cheap bulk blobs over CIFS/SMB. ${SB_*} come from .env.
   #   LOCAL : docker-compose.storagebox-sim.yml runs a Samba server at ${SB_HOST}.
@@ -192,13 +195,14 @@ services:
       [
         "sh",
         "-c",
-        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs && chown -R 1002:1002 /navidrome-data /navidrome-sonic-data /navidrome-plugins",
+        "chown -R 1000:1000 /vw && chmod 700 /vw && chown -R 1000:1000 /immich-thumbs /immich-encoded /immich-modelcache && chown -R 1001:1001 /caddy-data && chown -R 8000:8000 /seafile /seafile-logs && chown -R 1002:1002 /navidrome-data /navidrome-sonic-data /navidrome-plugins /navidrome-upload-staging",
       ]
     volumes:
       - vaultwarden_data:/vw
       - navidrome_data:/navidrome-data
       - navidrome_sonic_data:/navidrome-sonic-data
       - navidrome_plugins:/navidrome-plugins
+      - navidrome_upload_staging:/navidrome-upload-staging
       - immich_thumbs:/immich-thumbs
       - immich_encoded:/immich-encoded
       - immich_modelcache:/immich-modelcache
@@ -817,7 +821,8 @@ services:
       # shared bucket, which for a single user is a stricter limit, not a looser one.
       TZ: ${TZ}
     volumes:
-      # :ro — Navidrome only reads the library; files are added on the box itself.
+      # :ro — Navidrome only reads the library; files are added on the box itself
+      # or by navidrome-upload.
       - navidrome_music:/music:ro
       - navidrome_data:/data
       - navidrome_plugins:/plugins:ro
@@ -897,6 +902,58 @@ services:
         [
           "CMD-SHELL",
           "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)\" && timeout 8 ls /music >/dev/null 2>&1",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+  # ------------------------------------------------------ navidrome-upload --
+  # Upload page at <navidrome domain>/upload/
+  # (https://github.com/thilo/navidrome-upload): resumable uploads of tracks,
+  # folders or zips, which beets tags and files into a Navidrome library, for
+  # Navidrome admins with their existing login. Its README covers the login
+  # reuse and the upload checks. Built on the host; the versioned tag makes
+  # `up` build a new release.
+  navidrome-upload:
+    build: https://github.com/thilo/navidrome-upload.git#v${NAVIDROME_UPLOAD_VERSION}
+    image: pc-navidrome-upload:${NAVIDROME_UPLOAD_VERSION}
+    container_name: pc-navidrome-upload
+    restart: *restart
+    # Go reaps beets but not the healthcheck's orphans; see navidrome-sonic.
+    init: true
+    # Measured: 89 MiB peak importing a 40-track album zip, 6 MiB idle. The
+    # headroom is for MusicBrainz matching, which a test library can't exercise.
+    mem_limit: 256m
+    # Measured peak: 11, during an import.
+    pids_limit: 64
+    # Below the default weight, as for navidrome-sonic: an import yields to
+    # everything else.
+    cpu_shares: 256
+    # Writes the library, so it needs the music mount's uid.
+    user: "1002:1002"
+    volumes:
+      - navidrome_music:/music
+      - navidrome_upload_staging:/staging
+    # proxy: Caddy, Navidrome (login checks) and egress for MusicBrainz and
+    # cover art lookups.
+    networks:
+      - proxy
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Also list the Storage Box CIFS mount, as for navidrome.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)\" && timeout 8 ls /music >/dev/null 2>&1",
         ]
       interval: 30s
       timeout: 15s

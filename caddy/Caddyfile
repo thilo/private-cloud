@@ -98,5 +98,14 @@
 	tls {$CADDY_TLS}
 	import security_headers
 
-	reverse_proxy navidrome:4533
+	# navidrome-upload, on Navidrome's origin so its page can use the web UI's
+	# login (see navidrome-upload's README). It keeps the /upload prefix.
+	redir /upload /upload/
+	handle /upload/* {
+		reverse_proxy navidrome-upload:8080
+	}
+
+	handle {
+		reverse_proxy navidrome:4533
+	}
 }

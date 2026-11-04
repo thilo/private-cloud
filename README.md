@@ -13,7 +13,8 @@ Self-hosted replacements for the usual cloud subscriptions, in one
 - **Navidrome** — music streaming from your own MP3 library (replaces Spotify /
   Apple Music for the music you own), with album art, search, playlists, and
   Instant Mix and mood playlists from what the tracks sound like; works with any
-  Subsonic player on Mac, Windows and iPhone
+  Subsonic player on Mac, Windows and iPhone. New music is uploaded from a
+  browser and tagged by **beets**
 
 behind a single **Caddy** reverse proxy with automatic HTTPS. The same base
 compose file runs locally and on a real server.
@@ -51,6 +52,7 @@ what the stack does and how to run it.
   https://immich.…     → │  immich-server ─ immich-db / immich-redis / -ml    │
   https://vault.…      → │  vaultwarden (sqlite)                              │
   https://music.…      → │  navidrome (sqlite) ─ navidrome-sonic (similarity) │
+       …/upload        → │    └ navidrome-upload (tus uploads, beets)         │
                          └────────────────────────────────────────────────────┘
    databases live on internal-only networks · only Caddy publishes host ports
 ```
@@ -153,6 +155,7 @@ the server's local SSD.
 | Seafile logs                                      | local SSD              | `seafile_logs`                                |
 | Music library (`music/`, plain files)             | **Storage Box** (CIFS) | `navidrome_music`                             |
 | Audio-similarity embeddings (rebuildable)         | local SSD              | `navidrome_sonic_data`                        |
+| Music uploads waiting for import                  | local SSD              | `navidrome_upload_staging`                    |
 | All databases + Vaultwarden + Navidrome           | local SSD              | `immich_db`, `seafile_db`, `vaultwarden_data`, `navidrome_data` |
 
 **`immich-preview-mover` is optional.** Immich puts both of an asset's
@@ -308,7 +311,7 @@ docker exec pc-seafile mount | grep ' /shared/seafile '
 ## Music library
 
 Navidrome streams the files in the `music/` folder on the Storage Box; it never
-writes to it (the mount is read-only). Each library is one folder below
+writes to it (its mount is read-only). Each library is one folder below
 `music/`: `music/${NAVIDROME_LIBRARY}/` is the default one, and further
 libraries, such as one per user or a shared one, are sibling folders added under
 **Settings → Libraries**. Access is granted per library, so an album is shared
@@ -318,6 +321,20 @@ copying files into a library's folder — over SMB, SFTP or rsync, whichever the
 box offers — in any layout below it. Tags drive
 artist, album and track order; album art comes from a `cover.*`, `folder.*` or
 `front.*` image beside the tracks, or from the art embedded in the files.
+
+**Uploading from a browser.** Logged in to Navidrome as an admin, open
+`https://music.…/upload/`, pick a library and drop audio files, folders or zip
+archives; images are not accepted. Uploads resume after a dropped connection, or
+when the same file is added again after a reload. beets sorts the tracks into
+albums by their tags, retags them from MusicBrainz where it is sure of the
+match, keeps the existing tags otherwise, and files them as Artist/Album;
+Navidrome then scans just those folders, also when the page was closed. Matched
+albums get a `cover.jpg` from the Cover Art Archive, the others show the art
+embedded in their files. A track already in any library (the same MusicBrainz
+recording, or the same title, album and artist) is not added again and is listed
+as skipped; that covers files copied onto the box too, once Navidrome has
+scanned them. Accepted types, size limits and the checks on uploaded files are
+in [navidrome-upload](https://github.com/thilo/navidrome-upload).
 
 New files appear after the next scan, which runs hourly, or at once with **Scan
 library** in the web UI. Files that reach the box from another machine never
@@ -390,6 +407,7 @@ Verified on the live stack:
 | immich-ml                    | ✅ uid 1000                                                | ✅ yes           |
 | navidrome                    | ✅ uid 1002, music mounted read-only                       | ✅ yes           |
 | navidrome-sonic              | ✅ uid 1002, music read-only, internal network only        | ✅ yes           |
+| navidrome-upload             | ✅ uid 1002, Navidrome admins only, uploads checked        | ✅ yes           |
 
 `seafile-server` is the one exception, and a stock-image limitation: the image
 regenerates config and runs its own nginx across the filesystem. It keeps every
@@ -579,9 +597,9 @@ This repository — the compose files, `Caddyfile`, scripts and docs — is
 [MIT licensed](LICENSE).
 
 That covers the orchestration only. The applications it runs are separate
-projects, pulled as prebuilt container images (`navidrome-sonic` is built on
-the host from its repository) and never redistributed here; each keeps its own
-license:
+projects, pulled as prebuilt container images (`navidrome-sonic` and
+`navidrome-upload` are built on the host from their repositories) and never
+redistributed here; each keeps its own license:
 
 | Component                               | License                         |
 | --------------------------------------- | ------------------------------- |
@@ -590,6 +608,7 @@ license:
 | Vaultwarden                             | AGPL-3.0                        |
 | Navidrome                               | GPL-3.0                         |
 | navidrome-sonic                         | GPL-3.0; models CC BY-NC-SA 4.0 |
+| navidrome-upload, beets, tusd, Uppy     | MIT                             |
 | Caddy                                   | Apache-2.0                      |
 | MariaDB                                 | GPL-2.0                         |
 | Valkey                                  | BSD-3-Clause                    |

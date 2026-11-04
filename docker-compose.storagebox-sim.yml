@@ -87,3 +87,7 @@ services:
     depends_on:
       storagebox:
         condition: service_healthy
+  navidrome-upload:
+    depends_on:
+      storagebox:
+        condition: service_healthy
