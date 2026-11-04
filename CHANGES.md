@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.8.4] — 2026-11-04
+
+### Changed
+
+- `navidrome-upload` `0.1.1` → `0.1.2`: uploads are now matched against
+  MusicBrainz, and empty tags are filled from the uploaded folder and file names.
+
 ## [1.8.3] — 2026-11-04
 
 ### Fixed
