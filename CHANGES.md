@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.8.3] — 2026-11-04
+
+### Fixed
+
+- The Immich server now returns the memory of a thumbnail burst to the OS instead
+  of keeping it while idle.
+
 ## [1.8.2] — 2026-11-04
 
 ### Changed
