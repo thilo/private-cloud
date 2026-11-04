@@ -145,6 +145,10 @@ services:
       SEAFILE_DOMAIN: ${SEAFILE_DOMAIN}
       NAVIDROME_DOMAIN: ${NAVIDROME_DOMAIN}
       CADDY_TLS: ${CADDY_TLS}
+      # Go listens with MPTCP by default, and the reported CVE-2026-98432 exploit goes
+      # through an MPTCP listener. Plain TCP only. Not the net.mptcp.enabled sysctl:
+      # it fails container start on kernels without MPTCP.
+      GODEBUG: multipathtcp=0
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.8.6] — 2026-11-04
+
+### Security
+
+- Caddy now accepts plain TCP only, no MPTCP (CVE-2026-98432 mitigation).
+
 ## [1.8.5] — 2026-11-04
 
 ### Changed
