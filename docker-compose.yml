@@ -783,6 +783,9 @@ services:
     image: deluan/navidrome:${NAVIDROME_VERSION}
     container_name: pc-navidrome
     restart: *restart
+    # Navidrome reaps its own children but not the healthcheck's orphans; see
+    # navidrome-sonic.
+    init: true
     # Single Go process; ffmpeg runs as a child only when a client asks for a
     # transcoded stream. Measured: 89 MiB anon peak over a full scan of 625
     # tracks + 8 concurrent transcodes.

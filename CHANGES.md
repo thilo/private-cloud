@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.8.1] — 2026-11-04
+
+### Fixed
+
+- Navidrome no longer fills its process limit every two hours, which crashed
+  library scans and made the mount watchdog restart the Storage Box services.
+
 ## [1.8.0] — 2026-11-04
 
 ### Added
