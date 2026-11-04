@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.8.2] — 2026-11-04
+
+### Changed
+
+- `navidrome-sonic` `0.3.0` → `0.4.0`, a Go rewrite without Python. The plugin has
+  to be enabled again (see its release notes).
+
 ## [1.8.1] — 2026-11-04
 
 ### Fixed

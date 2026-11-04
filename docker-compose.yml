@@ -871,13 +871,14 @@ services:
     image: pc-navidrome-sonic:${NAVIDROME_SONIC_VERSION}
     container_name: pc-navidrome-sonic
     restart: *restart
-    # python runs as PID 1 and never reaps orphans; the healthcheck's busybox
-    # timeout leaves one per run, which would fill pids_limit.
+    # The Go sidecar runs as PID 1 and never reaps orphans; the healthcheck's
+    # busybox timeout leaves one per run, which would fill pids_limit.
     init: true
-    # Measured: 116 MiB anon peak over a full analysis of 676 files, 62 MiB idle.
-    mem_limit: 192m
-    # Measured peak: 31.
-    pids_limit: 64
+    # Measured: 76 MiB peak building the index at startup, 74 MiB analysing,
+    # 44 MiB idle.
+    mem_limit: 128m
+    # Measured peak: 14.
+    pids_limit: 32
     # Below the default CPU weight under either of Docker's cpu_shares rescales
     # (see immich-ml), so analysis yields to the other services and still uses
     # idle CPU.
@@ -904,7 +905,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)\" && timeout 8 ls /music >/dev/null 2>&1",
+          "wget -q -T 5 -O /dev/null http://127.0.0.1:8000/health && timeout 8 ls /music >/dev/null 2>&1",
         ]
       interval: 30s
       timeout: 15s
