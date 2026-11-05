@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.8.7] — 2026-11-05
+
+### Changed
+
+- `navidrome-upload` `0.1.3` → `0.1.4`: uploads now get cover art from the Cover
+  Art Archive only, no longer from an iTunes name search.
+
 ## [1.8.6] — 2026-11-04
 
 ### Security
