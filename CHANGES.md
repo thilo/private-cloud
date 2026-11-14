@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.8.8] — 2026-11-14
+
+### Changed
+
+- `immich-preview-mover` now walks the whole thumbs tree once a day and on start;
+  the 5-minute sweeps in between read only recently changed directories. Its
+  `--once` option is gone; restarting the service runs the same full pass.
+
 ## [1.8.7] — 2026-11-05
 
 ### Changed

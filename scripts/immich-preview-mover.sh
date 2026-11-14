@@ -29,10 +29,9 @@
 # Regenerating does NOT leak: the path in the DB is unchanged, so Immich queues no
 # delete and sharp overwrites through the link.
 #
-# Runs as the pc-immich-preview-mover service. Pass --once for a single pass —
-# that is also the one-time migration of an existing thumbs/ tree, and it is
-# resumable: every step is idempotent, so a re-run finishes what was interrupted.
-# Stopping the service is safe and stops new moves, but does not bring previews
+# Runs as the pc-immich-preview-mover service. Every start begins with a full
+# walk, which also migrates an existing thumbs/ tree; every step is idempotent,
+# so a restart finishes what was interrupted. Stopping the service is safe and stops new moves, but does not bring previews
 # back: the symlinks already written keep pointing at the box.
 set -u
 
@@ -44,6 +43,9 @@ INTERVAL=300  # seconds between sweeps
 # match. find truncates an age to whole minutes before comparing, so +1 skips
 # everything younger than two minutes.
 SETTLE=1
+# Minutes between full walks of thumbs/. The sweeps in between descend only into
+# leaf directories changed since the previous sweep; see sweep().
+FULL_EVERY=1440
 # --reclaim ignores anything younger than this. It keeps the pass off files a
 # concurrent sweep is still working on — a blob is on the box for a moment before
 # its symlink replaces it, and a scratch .tmp has no thumbs counterpart at all, so
@@ -67,10 +69,7 @@ move_one() {
   dst="$DST/$rel"
   dir="${dst%/*}"
   base="${src##*/}"
-  # Scratch names carry the pid so a --once migration and the running service can
-  # sweep at the same time without writing over each other's half-copied file.
-  # Both clean up after themselves on every failure path; only a hard kill leaves
-  # a .tmp behind, which costs a few stray bytes on the box and nothing else.
+  # Every failure path removes these; only a hard kill leaves a stray .tmp.
   tmp="$dir/.${base}.$$.tmp"
   link="${src%/*}/.tmplink.$$.${base}"
 
@@ -107,22 +106,34 @@ move_one() {
 
 sweep() {
   # -type f is the whole selection: an already-moved preview is a symlink, so
-  # what is left as a regular file is exactly what still needs moving. No
-  # timestamp bookkeeping, and nothing to redo after a restart.
+  # what is left as a regular file is exactly what still needs moving.
+  #
+  # With a window (minutes), only leaf directories modified within it are read.
+  # Immich nests every file at thumbs/<owner>/<xx>/<yy>/, and creating or
+  # replacing a file there updates that leaf's mtime, so an unchanged leaf holds
+  # nothing new. Pruning matters because reading every directory of the tree is
+  # more than the mem_limit can keep cached, so each full walk rereads it all
+  # from disk. Anything a windowed sweep misses (a different layout, a leaf
+  # touched while this was not running) is picked up by the next full walk.
+  #
+  # Returns non-zero if any move failed: the leaf of a failed file may fall out
+  # of the next window, so the caller retries with a full walk.
   #
   # The counters live inside the braces because the pipe puts that block in a
   # subshell — totalling outside it would always report zero.
-  find "$SRC" -type f -name '*_preview.*' -mmin +"$SETTLE" | {
+  if [ -n "${1:-}" ]; then
+    set -- -mindepth 3 -maxdepth 4 '(' -type d -mmin +"$1" -prune ')' -o
+  else
+    set --
+  fi
+  find "$SRC" "$@" -type f -name '*_preview.*' -mmin +"$SETTLE" -print | {
     moved=0; failed=0; moved_bytes=0
     while IFS= read -r f; do
       if move_one "$f"; then moved=$((moved + 1)); else failed=$((failed + 1)); fi
-      if [ $(( (moved + failed) % 500 )) -eq 0 ]; then
-        log "progress: $moved moved, $failed failed"
-      fi
     done
     [ "$moved" -gt 0 ] && log "moved $moved previews ($((moved_bytes / 1024 / 1024)) MiB) to the box"
     [ "$failed" -gt 0 ] && log "$failed previews could not be moved, will retry next sweep"
-    :
+    [ "$failed" -eq 0 ]
   }
 }
 
@@ -171,11 +182,8 @@ reclaim() {
         log "orphan: $rel ($size bytes)"
       fi
     done
-    if [ "$confirm" = yes ]; then
-      log "reclaimed $n orphaned previews ($((bytes / 1024 / 1024)) MiB), kept $kept"
-    else
-      log "$n orphaned previews ($((bytes / 1024 / 1024)) MiB), kept $kept -- nothing deleted"
-    fi
+    [ "$confirm" = yes ] && verb=reclaimed || verb="found (dry run, nothing deleted)"
+    log "$verb $n orphaned previews ($((bytes / 1024 / 1024)) MiB), kept $kept"
     [ "$failed" -gt 0 ] && log "$failed could not be deleted"
     :
   }
@@ -202,21 +210,26 @@ case "${1:-}" in
     log "reconciling $DST against $SRC"
     reclaim "$confirm" || exit 1
     ;;
-  --once)
-    log "single pass over $SRC"
-    sweep
-    log "pass complete"
-    ;;
   "")
     log "watching $SRC, sweeping every ${INTERVAL}s, reclaiming every $((RECLAIM_EVERY / 1440))d"
+    last_full=0; prev=0
     while :; do
-      sweep
+      now=$(date +%s)
+      if [ $((now - last_full)) -ge $((FULL_EVERY * 60)) ]; then
+        window=; last_full=$now
+      else
+        # Back to the previous sweep's start, plus SETTLE for the files it skipped
+        # as too young, plus a minute each for find's whole-minute rounding.
+        window=$(( (now - prev) / 60 + SETTLE + 2 ))
+      fi
+      prev=$now
+      sweep "$window" || last_full=0
       maybe_reclaim
       sleep "$INTERVAL"
     done
     ;;
   *)
-    echo "usage: $0 [--once | --reclaim [--yes]]" >&2
+    echo "usage: $0 [--reclaim [--yes]]" >&2
     exit 2
     ;;
 esac
