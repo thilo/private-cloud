@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.9.0] — 2026-11-20
+
+### Added
+
+- Navidrome songs and albums can be hidden per user and shown again with an
+  "Include Hidden" filter, in the web UI and the Subsonic API.
+
+### Changed
+
+- `navidrome` is now built on the host from the `thilo/navidrome` fork
+  (`NAVIDROME_VERSION` `0.64.2` → `0.64.2-hidden.1`), not pulled as
+  `deluan/navidrome`.
+
 ## [1.8.8] — 2026-11-14
 
 ### Changed

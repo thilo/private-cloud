@@ -13,8 +13,9 @@ Self-hosted replacements for the usual cloud subscriptions, in one
 - **Navidrome** — music streaming from your own MP3 library (replaces Spotify /
   Apple Music for the music you own), with album art, search, playlists, and
   Instant Mix and mood playlists from what the tracks sound like; works with any
-  Subsonic player on Mac, Windows and iPhone. New music is uploaded from a
-  browser and tagged by **beets**
+  Subsonic player on Mac, Windows and iPhone. Songs and albums can be hidden per
+  user and shown again with an "Include Hidden" filter. New music is uploaded
+  from a browser and tagged by **beets**
 
 behind a single **Caddy** reverse proxy with automatic HTTPS. The same base
 compose file runs locally and on a real server.

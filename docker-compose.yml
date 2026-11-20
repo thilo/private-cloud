@@ -791,9 +791,17 @@ services:
   # Music streaming over the Subsonic API, which the desktop and iOS players
   # speak, plus its own web player. The library is the plain-file music/ folder
   # on the Storage Box; Navidrome indexes it and reads album art from the tags or
-  # a cover.* file beside the tracks.
+  # a cover.* file beside the tracks. Built from the fork
+  # (https://github.com/thilo/navidrome), which adds per-user hiding of songs and
+  # albums behind an "Include Hidden" filter; its HIDDEN.md lists the edits to
+  # upstream. The tag is the upstream version plus a fork suffix. Built on the
+  # host; the versioned tag makes `up` build a new release.
   navidrome:
-    image: deluan/navidrome:${NAVIDROME_VERSION}
+    build:
+      context: https://github.com/thilo/navidrome.git#v${NAVIDROME_VERSION}
+      args:
+        GIT_TAG: v${NAVIDROME_VERSION}
+    image: pc-navidrome:${NAVIDROME_VERSION}
     container_name: pc-navidrome
     restart: *restart
     # Navidrome reaps its own children but not the healthcheck's orphans; see
