@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.9.1] — 2026-11-20
+
+### Changed
+
+- `navidrome` `0.64.2-hidden.1` → `0.64.2-hidden.2`: an artist whose albums are
+  all hidden no longer appears in artist lists and search.
+
 ## [1.9.0] — 2026-11-20
 
 ### Added
