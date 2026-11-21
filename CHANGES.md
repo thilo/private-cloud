@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.9.3] — 2026-11-21
+
+### Changed
+
+- `navidrome-sonic` `0.4.0` → `1.1.0`: mood playlists now hold 50 tracks picked at
+  random from those that fit the mood, and refresh every other day instead of
+  weekly.
+
 ## [1.9.2] — 2026-11-20
 
 ### Changed

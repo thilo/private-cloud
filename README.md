@@ -598,8 +598,8 @@ This repository — the compose files, `Caddyfile`, scripts and docs — is
 [MIT licensed](LICENSE).
 
 That covers the orchestration only. The applications it runs are separate
-projects, pulled as prebuilt container images (`navidrome-sonic` and
-`navidrome-upload` are built on the host from their repositories) and never
+projects, pulled as prebuilt container images (`navidrome`, `navidrome-sonic`
+and `navidrome-upload` are built on the host from their repositories) and never
 redistributed here; each keeps its own license:
 
 | Component                               | License                         |
@@ -607,7 +607,7 @@ redistributed here; each keeps its own license:
 | Noodle Gallery (Immich fork)            | AGPL-3.0                        |
 | Seafile Community Edition (server core) | AGPL-3.0                        |
 | Vaultwarden                             | AGPL-3.0                        |
-| Navidrome                               | GPL-3.0                         |
+| Navidrome (fork)                        | GPL-3.0                         |
 | navidrome-sonic                         | GPL-3.0; models CC BY-NC-SA 4.0 |
 | navidrome-upload, beets, tusd, Uppy     | MIT                             |
 | Caddy                                   | Apache-2.0                      |

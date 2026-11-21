@@ -834,7 +834,7 @@ services:
       # The sonic plugin (from navidrome-sonic) serves getSonicSimilarTracks and
       # findSonicPath. As the first agent it also answers Instant Mix
       # (getSimilarSongs2); for a track it has no answer for, the stock agents
-      # that follow it take over. It also writes each user's weekly mood playlists.
+      # that follow it take over. It also writes each user's mood playlists.
       ND_PLUGINS_ENABLED: "true"
       ND_PLUGINS_FOLDER: /plugins
       ND_AGENTS: sonic,deezer,lastfm,listenbrainz
