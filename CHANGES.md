@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.9.4] — 2026-11-23
+
+### Changed
+
+- Gallery `v5.9.0` → `v5.11.1` (Immich 3.4.2 base): faces and pets across whole
+  videos, tags in the app, JPEG XL.
+
 ## [1.9.3] — 2026-11-21
 
 ### Changed
