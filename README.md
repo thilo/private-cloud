@@ -387,10 +387,11 @@ Every service: `no-new-privileges`, `cap_drop: ALL` plus only the capabilities
 its image genuinely needs, a pinned image, and no published ports except
 Caddy's. Databases sit on egress-blocked `internal:` networks; the
 unauthenticated immich-ml API is on its own network, reachable only from
-immich-server. The **read-only root filesystem** + `tmpfs` scratch is what
-satisfies "remove dev tools / package managers": the stock images still ship
-`apt`/`apk`, but nothing can be installed or persisted on a read-only,
-capability-stripped, no-new-privileges container. Scratch mounts are `nosuid`,
+immich-server. The notification server sits only on internal networks, shared
+with Caddy and Seafile, so it has no egress. The **read-only root filesystem** +
+`tmpfs` scratch is what satisfies "remove dev tools / package managers": the
+stock images still ship `apt`/`apk`, but nothing can be installed or persisted
+on a read-only, capability-stripped, no-new-privileges container. Scratch mounts are `nosuid`,
 `nodev` and — wherever the image tolerates it — `noexec`.
 
 Verified on the live stack:

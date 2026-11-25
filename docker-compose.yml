@@ -45,6 +45,10 @@ networks:
   # navidrome <-> navidrome-sonic only. The sidecar's API has no authentication.
   sonic:
     internal: true
+  # caddy <-> notification-server only. The sidecar needs no egress: config comes
+  # from env and its DB is on seafile-internal.
+  notification:
+    internal: true
 
 volumes:
   caddy_data:
@@ -155,6 +159,7 @@ services:
       # No /config volume: persist_config off (Caddyfile) means it is never written.
     networks:
       - proxy
+      - notification
     read_only: true
     # noexec/nosuid/nodev: /tmp is the one writable path on the read-only rootfs,
     # so deny running a dropped binary there. size caps it.
@@ -758,7 +763,7 @@ services:
     volumes:
       - seafile_logs:/shared/seafile/logs
     networks:
-      - proxy
+      - notification
       - seafile-internal
     depends_on:
       seafile-db:

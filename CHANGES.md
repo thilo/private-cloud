@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.10.0] — 2026-11-26
+
+### Changed
+
+- The Seafile notification server now has no internet access: it moved off the
+  `proxy` bridge onto an internal network shared only with Caddy.
+
 ## [1.9.4] — 2026-11-23
 
 ### Changed
