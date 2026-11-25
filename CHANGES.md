@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org/);
 This repo versions the orchestration (compose files, `Caddyfile`, scripts, docs) only.
 
+## [1.10.1] — 2026-11-26
+
+### Security
+
+- Seafile `13.0.25` → `13.0.30` and notification-server `13.0.21` → `13.0.29`.
+- Vaultwarden `1.37.2-alpine` → `1.37.5-alpine`.
+
 ## [1.10.0] — 2026-11-26
 
 ### Changed
